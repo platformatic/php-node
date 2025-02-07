@@ -10,7 +10,7 @@ PHP has no concept of a "socket", it instead has its own form of streams which
 can be mounted into a request run. The `php://input` stream represents the body
 of an incoming request.
 
-### php://outut
+### php://output
 
 As with `php://input`, `php://output` is a stream that can be mounted into a
 request run, but is instead used for writing out to the response.
