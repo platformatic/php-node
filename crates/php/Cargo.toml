@@ -1,0 +1,19 @@
+[package]
+edition = "2021"
+name = "php"
+version = "0.0.0"
+
+[lib]
+name = "php"
+path = "src/lib.rs"
+
+[[bin]]
+name = "php-main"
+path = "src/main.rs"
+
+[build-dependencies]
+autotools = "0.2"
+bindgen = "0.69.4"
+cc = "1.1.7"
+downloader = "0.2.8"
+file-mode = "0.1.2"
