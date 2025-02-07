@@ -1,0 +1,10 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/php",
+    "crates/php_node"
+]
+
+# [profile.release]
+# lto = true
+# strip = "symbols"
