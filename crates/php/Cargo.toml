@@ -11,6 +11,9 @@ path = "src/lib.rs"
 name = "php-main"
 path = "src/main.rs"
 
+[dependencies]
+lang_handler = { path = "../lang_handler", features = ["c"] }
+
 [build-dependencies]
 autotools = "0.2"
 bindgen = "0.69.4"

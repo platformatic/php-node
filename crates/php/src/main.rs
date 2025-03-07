@@ -1,24 +1,36 @@
-use php::{Embed, Request};
+use php::{Embed, Request, Handler};
 
 pub fn main() {
-    let embed = Embed::new_with_args(std::env::args());
+    let code = "
+        http_response_code(404);
+        header('Content-Type: text/html');
+        print('hello');
+        flush();
+    ";
+    let filename = Some("test.php");
+    let embed = Embed::new_with_args(code, filename, std::env::args());
+    // let embed = Embed::new(code, filename);
 
     let request = Request::builder()
-        .method("GET")
-        .path("/test.php")
+        .method("POST")
+        .url("http://example.com/test.php").expect("invalid url")
+        .header("Content-Type", "text/html")
+        .header("Content-Length", 13.to_string())
         .body("Hello, World!")
         .build();
 
+    println!("=== request ===");
     println!("method: {}", request.method());
-    println!("path: {}", request.path());
-    println!("body: {}", request.body());
+    println!("url: {:?}", request.url());
+    println!("headers: {:?}", request.headers());
+    println!("body: {:?}", request.body());
+    println!("");
 
-    let response = embed.handle_request(
-        ";echo 'Hello, World!';",
-        Some("test.php"),
-        request.clone()
-    );
+    let response = embed.handle(request.clone()).unwrap();
 
-    println!("Request: {:?}", request);
-    println!("Response: {:?}", response);
+    println!("\n=== response ===");
+    println!("status: {:?}", response.status());
+    println!("headers: {:?}", response.headers());
+    println!("body: {:?}", response.body());
+    println!("");
 }

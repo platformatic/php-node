@@ -1,96 +1,100 @@
-use std::{env::Args, ffi::{CStr, CString}};
+use std::{env::Args, ffi::{c_void, c_char, CStr, CString}};
 
-use crate::{sys, Request, Response};
+use lang_handler::{Handler, Request, Response};
 
-pub struct Embed;
+use crate::sys;
 
-fn args_to_c(args: Args) -> (i32, *mut *mut std::os::raw::c_char) {
-    let mut c_args = Vec::new();
-    let mut c_ptrs = Vec::new();
-
-    for arg in args {
-        let c_arg = std::ffi::CString::new(arg).unwrap();
-        let c_ptr = c_arg.clone().into_raw();
-        c_args.push(c_arg);
-        c_ptrs.push(c_ptr);
-    }
-
-    let c_args = c_args
-        .into_iter()
-        .map(|c_arg| c_arg.into_raw())
-        .collect::<Vec<_>>();
-
-    let mut c_ptrs = c_ptrs
-        .into_iter()
-        .collect::<Vec<_>>();
-
-    (c_args.len() as i32, c_ptrs.as_mut_ptr())
+#[derive(Debug, Clone)]
+pub struct Embed {
+    code: String,
+    filename: Option<String>,
 }
 
+unsafe impl Send for Embed {}
+unsafe impl Sync for Embed {}
+
 impl Embed {
-    pub fn new() -> Self {
-        Embed::new_with_c_args(0, std::ptr::null_mut())
-    }
-
-    pub fn new_with_args(args: Args) -> Self {
-        let argv: Vec<String> = args.collect();
-        Embed::new_with_argv(argv)
-    }
-
-    pub fn new_with_argv<S>(argv: Vec<S>) -> Self
+    pub fn new<C, F>(code: C, filename: Option<F>) -> Self
     where
+        C: Into<String>,
+        F: Into<String>
+    {
+        Embed::new_with_argv::<C, F, String>(code, filename, vec![])
+    }
+
+    pub fn new_with_args<C, F>(code: C, filename: Option<F>, args: Args) -> Self
+    where
+        C: Into<String>,
+        F: Into<String>
+    {
+        let argv: Vec<String> = args.collect();
+        Embed::new_with_argv(code, filename, argv)
+    }
+
+    pub fn new_with_argv<C, F, S>(code: C, filename: Option<F>, argv: Vec<S>) -> Self
+    where
+        C: Into<String>,
+        F: Into<String>,
         S: AsRef<str>,
     {
-        let mut c_args = Vec::new();
-        let mut c_ptrs = Vec::new();
-
-        for arg in argv {
-            let c_arg = CString::new(arg.as_ref()).unwrap();
-            let c_ptr = c_arg.clone().into_raw();
-            c_args.push(c_arg);
-            c_ptrs.push(c_ptr);
-        }
-
-        let c_args = c_args
+        let argc = argv.len() as i32;
+        let argv = argv
             .into_iter()
-            .map(|c_arg| c_arg.into_raw())
+            .map(|v| CString::new(v.as_ref()).unwrap())
             .collect::<Vec<_>>();
 
-        let mut c_ptrs = c_ptrs
-            .into_iter()
-            .collect::<Vec<_>>();
-
-        Embed::new_with_c_args(c_args.len() as i32, c_ptrs.as_mut_ptr())
-    }
-
-    fn new_with_c_args(argc: i32, argv: *mut *mut std::os::raw::c_char) -> Self {
-        unsafe { sys::php_embed_init(argc, argv); }
-        Embed
-    }
-
-    pub fn handle_request<C, F>(&self, code: C, filename: Option<F>, request: Request) -> Response
-    where
-        C: AsRef<str>,
-        F: Into<String>,
-    {
-        let code = CString::new(code.as_ref())
-            .unwrap();
-
-        let filename = filename
-            .map(|v| CString::new(v.into()))
-            .unwrap_or(CString::new("<unnamed>"))
-            .unwrap();
+        let mut argv_ptrs = argv
+            .iter()
+            .map(|v| v.as_ptr() as *mut c_char)
+            .collect::<Vec<*mut c_char>>();
 
         unsafe {
-            sys::php_http_handle_request(code.as_ptr(), filename.as_ptr(), *request)
-        }.into()
+            sys::php_embed_init(argc, argv_ptrs.as_mut_ptr());
+            // Teardown initial request as we will start them ourselves later
+            sys::php_request_shutdown(std::ptr::null_mut());
+            sys::php_http_setup();
+        }
+
+        Embed {
+            code: code.into(),
+            filename: filename.map(|v| v.into()),
+        }
     }
 }
 
 impl Drop for Embed {
     fn drop(&mut self) {
         unsafe {
+            sys::php_request_startup();
             sys::php_embed_shutdown();
         }
+    }
+}
+
+impl Handler for Embed {
+    type Error = String;
+
+    fn handle(&self, request: Request) -> Result<Response, Self::Error> {
+        let code = CString::new(self.code.clone())
+            .unwrap();
+
+        let filename = self.filename
+            .as_ref()
+            .map(|v| CString::new(v.clone()))
+            .unwrap_or(CString::new("<unnamed>"))
+            .unwrap();
+
+        let mut request: lang_handler::lh_request_t = request.into();
+        let request = &mut request as *mut _ as *mut sys::lh_request_t;
+
+        let response = unsafe {
+            sys::php_http_handle_request(code.as_ptr(), filename.as_ptr(), request)
+        };
+
+        let response = unsafe {
+            &*(response as *mut lang_handler::lh_response_t)
+        };
+
+        Ok(response.into())
     }
 }
