@@ -49,10 +49,7 @@ impl Embed {
             .collect::<Vec<*mut c_char>>();
 
         unsafe {
-            sys::php_embed_init(argc, argv_ptrs.as_mut_ptr());
-            // Teardown initial request as we will start them ourselves later
-            sys::php_request_shutdown(std::ptr::null_mut());
-            sys::php_http_setup();
+            sys::php_http_init(argc, argv_ptrs.as_mut_ptr());
         }
 
         Embed {
@@ -65,8 +62,7 @@ impl Embed {
 impl Drop for Embed {
     fn drop(&mut self) {
         unsafe {
-            sys::php_request_startup();
-            sys::php_embed_shutdown();
+            sys::php_http_shutdown();
         }
     }
 }
@@ -90,6 +86,10 @@ impl Handler for Embed {
         let response = unsafe {
             sys::php_http_handle_request(code.as_ptr(), filename.as_ptr(), request)
         };
+
+        if response.is_null() {
+            return Err("Failed to handle request".into());
+        }
 
         let response = unsafe {
             &*(response as *mut lang_handler::lh_response_t)
