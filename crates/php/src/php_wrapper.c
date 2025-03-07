@@ -1,6 +1,7 @@
 // TODO: Review these dependencies. They were all auto-added by IDE completion.
 //       There's likely consolidated headers to get things from.
 #include "SAPI.h"
+#include "php.h"
 #include "php_main.h"
 #include "zend.h"
 #include "zend_alloc.h"
@@ -10,6 +11,9 @@
 #include "zend_property_hooks.h"
 #include "zend_types.h"
 #include "zend_variables.h"
+#include "zend_exceptions.h"
+#include "lang_handler.h"
+#include "php_ini_builder.h"
 
 #include <stdio.h>
 #include <stdint.h>
@@ -21,330 +25,143 @@
 #include <ext/standard/head.h>
 #include <ext/standard/info.h>
 
-typedef struct string_array {
-  size_t buffer_size;
-  size_t used_size;
-  size_t count;
-  char* buffer;
-  size_t* offsets;
-} string_array;
+typedef struct php_server_context_s {
+    int foo;
+} php_server_context_t;
 
-string_array* string_array_new(size_t initial_size) {
-  string_array* arr = (string_array*)malloc(sizeof(string_array));
-  if (!arr) return NULL;
-
-  arr->buffer_size = initial_size;
-  arr->used_size = 0;
-  arr->count = 0;
-  arr->buffer = (char*)malloc(initial_size * sizeof(char));
-  arr->offsets = (size_t*)malloc(initial_size * sizeof(size_t));
-
-  if (!arr->buffer || !arr->offsets) {
-    free(arr->buffer);
-    free(arr->offsets);
-    free(arr);
-    return NULL;
-  }
-
-  return arr;
+int php_sapi_module_startup(sapi_module_struct* sapi_module) {
+  php_server_context_t* context = (php_server_context_t*)SG(server_context);
+  printf("Startup from %d\n", context->foo);
+  return SUCCESS;
 }
-bool string_array_grow(string_array* arr, size_t new_size) {
-  char* new_buffer = (char*)realloc(arr->buffer, new_size * sizeof(char));
-  size_t* new_offsets = (size_t*)realloc(arr->offsets, new_size * sizeof(size_t));
 
-  if (!new_buffer || !new_offsets) {
-    free(new_buffer);
-    free(new_offsets);
-    return false;
-  }
-
-  arr->buffer = new_buffer;
-  arr->offsets = new_offsets;
-  arr->buffer_size = new_size;
-
-  return true;
+int php_sapi_activate() {
+  php_server_context_t* context = (php_server_context_t*)SG(server_context);
+  printf("Activate from %d\n", context->foo);
+  return SUCCESS;
 }
-bool string_array_add(string_array* arr, const char* str) {
-  size_t str_len = strlen(str) + 1; // include the null terminator
 
-  if (arr->used_size + str_len > arr->buffer_size) {
-    if (!string_array_grow(arr, (arr->buffer_size + str_len) * 2)) {
-      return false;
+int php_sapi_deactivate() {
+  php_server_context_t* context = (php_server_context_t*)SG(server_context);
+  printf("Deactivate from %d\n", context->foo);
+  return SUCCESS;
+}
+
+size_t sapi_ub_write(const char *str, size_t str_length) {
+  php_server_context_t* context = (php_server_context_t*)SG(server_context);
+  printf("%.*s from %d", (int)str_length, str, context->foo);
+  return str_length;
+}
+
+void sapi_node_flush() {
+  php_server_context_t* context = (php_server_context_t*)SG(server_context);
+  printf("Flush occurred from %d\n", context->foo);
+  if (!SG(headers_sent)) {
+    sapi_send_headers();
+    SG(headers_sent) = 1;
+  }
+}
+
+// void sapi_send_header(sapi_header_struct *sapi_header, void *server_context) {
+//   // Not sure _why_ this is necessary, but it is.
+//   if (sapi_header == NULL) return;
+//   php_server_context_t* context = (php_server_context_t*)server_context;
+//   printf("Header: %s from %d\n", sapi_header->header, context->foo);
+// }
+
+int php_sapi_send_headers(sapi_headers_struct *sapi_headers) {
+  php_server_context_t* context = (php_server_context_t*)SG(server_context);
+  printf("Headers sent from %d\n", context->foo);
+
+  sapi_header_struct  *h;
+  zend_llist_position pos;
+
+  h = zend_llist_get_first_ex(&sapi_headers->headers, &pos);
+  while (h) {
+    if ( h->header_len > 0 ) {
+      printf("Header: %s\n", h->header);
     }
+    h = zend_llist_get_next_ex(&sapi_headers->headers, &pos);
   }
-
-  arr->offsets[arr->count] = arr->used_size;
-  strcpy(&arr->buffer[arr->used_size], str);
-  arr->used_size += str_len;
-  arr->count++;
-
-  return true;
-}
-const char* string_array_get(string_array* arr, size_t index) {
-  if (index >= arr->count) {
-    return NULL;
-  }
-  return &arr->buffer[arr->offsets[index]];
-}
-bool string_array_remove(string_array* arr, size_t index) {
-  if (index >= arr->count) {
-    return false;
-  }
-
-  size_t start_offset = arr->offsets[index];
-  size_t next_offset = (index + 1 < arr->count) ? arr->offsets[index + 1] : arr->used_size;
-  size_t length_to_move = arr->used_size - next_offset;
-
-  memmove(&arr->buffer[start_offset], &arr->buffer[next_offset], length_to_move);
-  arr->used_size -= (next_offset - start_offset);
-
-  for (size_t i = index; i < arr->count - 1; ++i) {
-    arr->offsets[i] = arr->offsets[i + 1] - (next_offset - start_offset);
-  }
-  arr->count--;
-
-  return true;
-}
-void string_array_free(string_array* arr) {
-  free(arr->buffer);
-  free(arr->offsets);
-  free(arr);
+  return 0;
 }
 
-
-/**
- * A header key/value pair.
- */
-typedef struct php_http_header {
-  const char* key;
-  string_array* values;
-} php_http_header;
-
-php_http_header* php_http_header_init(php_http_header* self, const char* key, string_array* values) {
-  self->key = key;
-  self->values = values;
-  return self;
-}
-php_http_header* php_http_header_new(const char* key) {
-  php_http_header* self = (php_http_header*)malloc(sizeof(php_http_header));
-  if (!self) return NULL;
-
-  string_array* values = string_array_new(1);
-  if (!values) return NULL;
-
-  return php_http_header_init(self, key, values);
-}
-const char* php_http_header_key(php_http_header* self) {
-  return self->key;
-}
-string_array* php_http_header_values(php_http_header* self) {
-  return self->values;
-}
-bool php_http_header_add_value(php_http_header* self, const char* value) {
-  return string_array_add(self->values, value);
-}
-const char* php_http_header_get_value(php_http_header* self, size_t index) {
-  return string_array_get(self->values, index);
-}
-size_t php_http_header_value_count(php_http_header* self) {
-  return self->values->count;
-}
-bool php_http_header_remove_value(php_http_header* self, size_t index) {
-  return string_array_remove(self->values, index);
-}
-void php_http_header_free(php_http_header* self) {
-  free(self);
+// TODO: Read n bytes from request body in ctx, memcpy to buffer, return remaining bytes.
+size_t php_sapi_read_post(char *buffer, size_t count_bytes) {
+  php_server_context_t* context = (php_server_context_t*)SG(server_context);
+  printf("Read post from %d\n", context->foo);
+  return 0;
 }
 
-/**
- * A collection of headers.
- */
-typedef struct php_http_headers {
-  size_t allocated;
-  size_t count;
-  php_http_header* headers;
-} php_http_headers;
+char* php_sapi_read_cookies() {
+  return SG(request_info).cookie_data;
+}
 
-bool php_http_headers_grow(php_http_headers* self, size_t count) {
-  size_t new_size = (self->allocated + count) * sizeof(php_http_header);
-  self->headers = (php_http_header*)realloc(self->headers, new_size);
-  if (self->headers == NULL) return false;
-  self->allocated += count;
-  return true;
+void php_register_server_variables(zval *track_vars_array) {
+  php_server_context_t* context = (php_server_context_t*)SG(server_context);
+  printf("Register server variables from %d\n", context->foo);
 }
-php_http_headers* php_http_headers_init(php_http_headers* self) {
-  self->allocated = 0;
-  self->count = 0;
-  self->headers = NULL;
-  return self;
-}
-php_http_headers* php_http_headers_new(size_t count) {
-  php_http_headers* self = (php_http_headers*)malloc(sizeof(php_http_headers));
-  if (self == NULL) return NULL;
 
-  php_http_headers_init(self);
-  if (count > 0 && !php_http_headers_grow(self, count)) {
-    free(self);
-    return NULL;
-  }
+void php_sapi_log_message(const char *message, int syslog_type_int) {
+  php_server_context_t* context = (php_server_context_t*)SG(server_context);
+  printf("Log message: %s from %d\n", message, context->foo);
+}
 
-  return self;
+// static const char HARDCODED_INI[] =
+	// "log_errors=1\n"
+	// "implicit_flush=1\n"
+	// "memory_limit=128MB\n"
+	// "output_buffering=0\n";
+
+void php_http_setup() {
+  sapi_module.startup = php_sapi_module_startup;
+
+  sapi_module.activate = php_sapi_activate;
+  sapi_module.deactivate = php_sapi_deactivate;
+
+  sapi_module.ub_write = sapi_ub_write;
+  sapi_module.flush = sapi_node_flush;
+
+  sapi_module.sapi_error = php_error;
+
+  // sapi_module.send_header = sapi_send_header;
+  sapi_module.send_headers = php_sapi_send_headers;
+
+  sapi_module.read_post = php_sapi_read_post;
+  sapi_module.read_cookies = php_sapi_read_cookies;
+
+  sapi_module.register_server_variables = php_register_server_variables;
+  sapi_module.log_message = php_sapi_log_message;
+
+  // struct php_ini_builder ini_builder;
+  // php_ini_builder_init(&ini_builder);
+  // php_ini_builder_prepend_literal(&ini_builder, HARDCODED_INI);
 }
-void php_http_headers_free(php_http_headers* self) {
-  free(self->headers);
-  free(self);
-}
-bool php_http_headers_has_room(php_http_headers* self, size_t count) {
-  return self->allocated - self->count >= count;
-}
-size_t php_http_headers_count(php_http_headers* self) {
-  return self->count;
-}
-php_http_header* php_http_headers_get(php_http_headers* self, size_t index) {
-  return &self->headers[index];
-}
-int php_http_headers_find_index(php_http_headers* self, const char* key) {
-  for (int i = 0; i < (int)self->count; i++) {
-    if (strcmp(self->headers[i].key, key) == 0) {
-      return i;
+
+void clean_superglobals() {
+    // request
+    if (SG(request_info).request_method != NULL) {
+        lh_reclaim_str(SG(request_info).request_method);
     }
-  }
-  return -1;
-}
-php_http_header* php_http_headers_find(php_http_headers* self, const char* key) {
-  int index = php_http_headers_find_index(self, key);
-  if (index == -1) return NULL;
-  return &self->headers[index];
-}
-php_http_header* php_http_headers_remove(php_http_headers* self, const char* key) {
-  int i = php_http_headers_find_index(self, key);
-  if (i == -1) return NULL;
 
-  php_http_header* header = &self->headers[i];
-  for (int j = i; j < (int)self->count - 1; j++) {
-    self->headers[j] = self->headers[j + 1];
-  }
-  self->count--;
-
-  return header;
-}
-php_http_headers* php_http_headers_push(php_http_headers* self, const char* key, const char* value) {
-  php_http_header* header = php_http_headers_find(self, key);
-  if (header != NULL) {
-    if (!php_http_header_add_value(header, value)) {
-      return NULL;
+    // url
+    if (SG(request_info).path_translated != NULL) {
+        lh_reclaim_str(SG(request_info).path_translated);
     }
-    return self;
-  }
+    if (SG(request_info).query_string != NULL) {
+        lh_reclaim_str(SG(request_info).query_string);
+    }
+    if (SG(request_info).request_uri != NULL) {
+        lh_reclaim_str(SG(request_info).request_uri);
+    }
 
-  if (!php_http_headers_has_room(self, 1) && !php_http_headers_grow(self, 1)) {
-    return NULL;
-  }
-
-  string_array* values = string_array_new(1);
-  if (!values) return NULL;
-
-  string_array_add(values, value);
-  header = &self->headers[self->count++];
-  php_http_header_init(header, key, values);
-
-  return self;
-}
-
-/**
- * An incoming request.
- */
-typedef struct php_http_request {
-  const char* method;
-  const char* path;
-  php_http_headers headers;
-  const char* body;
-} php_http_request;
-
-php_http_request* php_http_request_init(php_http_request* self) {
-  self->method = NULL;
-  self->path = NULL;
-  php_http_headers_init(&self->headers);
-  self->body = NULL;
-  return self;
-}
-php_http_request* php_http_request_new() {
-  php_http_request* self = (php_http_request*)malloc(sizeof(php_http_request));
-  if (self == NULL) return NULL;
-
-  return php_http_request_init(self);
-}
-void php_http_request_free(php_http_request* self) {
-  free((void*)self->method);
-  free((void*)self->path);
-  php_http_headers_free(&self->headers);
-  free((void*)self->body);
-  free(self);
-}
-bool php_http_request_set_method(php_http_request* self, const char* method) {
-  self->method = strdup(method);
-  return true;
-}
-const char* php_http_request_get_method(php_http_request* self) {
-  return self->method;
-}
-bool php_http_request_set_path(php_http_request* self, const char* path) {
-  self->path = strdup(path);
-  return true;
-}
-const char* php_http_request_get_path(php_http_request* self) {
-  return self->path;
-}
-bool php_http_request_set_body(php_http_request* self, const char* body) {
-  self->body = strdup(body);
-  return true;
-}
-const char* php_http_request_get_body(php_http_request* self) {
-  return self->body;
-}
-
-/**
- * An outgoing response.
- */
-typedef struct php_http_response {
-  int status;
-  php_http_headers headers;
-  const char* body;
-} php_http_response;
-
-php_http_response* php_http_response_init(php_http_response* self) {
-  self->status = 0;
-  php_http_headers_init(&self->headers);
-  self->body = NULL;
-  return self;
-}
-php_http_response* php_http_response_new() {
-  php_http_response* self = (php_http_response*)malloc(sizeof(php_http_response));
-  if (self == NULL) return NULL;
-
-  return php_http_response_init(self);
-}
-void php_http_response_free(php_http_response* self) {
-  php_http_headers_free(&self->headers);
-  free((void*)self->body);
-  free(self);
-}
-bool php_http_response_set_status(php_http_response* self, int status) {
-  self->status = status;
-  return true;
-}
-int php_http_response_get_status(php_http_response* self) {
-  return self->status;
-}
-bool php_http_response_set_body(php_http_response* self, const char* body) {
-  self->body = strdup(body);
-  return true;
-}
-const char* php_http_response_get_body(php_http_response* self) {
-  return self->body;
-}
-php_http_headers* php_http_response_get_headers(php_http_response* self) {
-  return &self->headers;
+    // headers
+    if (SG(request_info).content_type != NULL) {
+        lh_reclaim_str(SG(request_info).content_type);
+    }
+    if (SG(request_info).cookie_data != NULL) {
+        lh_reclaim_str(SG(request_info).cookie_data);
+    }
 }
 
 /**
@@ -365,78 +182,89 @@ php_http_headers* php_http_response_get_headers(php_http_response* self) {
  * Each SAPI request is handled in an isolated PHP context, but code compilation
  * can be shared making spin up quick. Each of these contexts is single-threaded.
  */
-php_http_response* php_http_handle_request(const char* code, const char* filename, php_http_request* request) {
-  php_http_response* response = php_http_response_new();
-  if (response == NULL) return NULL;
+lh_response_t* php_http_handle_request(const char* code, const char* filename, lh_request_t* request) {
+  // This is where we store the stuff for associating callbacks with this request.
+  // TODO: This should probably contain the request and response objects.
+  php_server_context_t* context = malloc(sizeof(php_server_context_t));
+  context->foo = 555;
+  SG(server_context) = context;
 
-  // Teardown initial request.
-  php_request_shutdown((void*) 0);
+  SG(options) |= SAPI_OPTION_NO_CHDIR;
+  SG(headers_sent) = 0;
 
-  // Set up $_SERVER values.
-  // SG(request_info).script_filename = estrdup(filename);
-  // SG(request_info).php_self = estrdup(request->path);
-  SG(request_info).request_method = estrdup(request->method);
-  // SG(request_info).request_body =
-  SG(request_info).path_translated = estrdup(request->path);
-  // SG(request_info).query_string = estrdup(request->query_string);
-  // SG(request_info).request_uri = estrdup(request->request_uri);
-  // SG(request_info).cookie_data = estrdup(request->cookie_data);
-  // SG(request_info).content_type = estrdup(request->content_type);
-  // SG(request_info).content_length = estrdup(request->content_length);
-  // SG(request_info).server_software = estrdup(request->server_software); // wattpm?
-  // SG(request_info).gateway_interface = estrdup(request->gateway_interface); // CGI/1.1
-  // SG(request_info).request_time_float = request->request_time_float;
-  // SG(request_info).document_root = estrdup(request->document_root);
-  // SG(request_info).remote_addr = estrdup(request->remote_addr);
-  // SG(request_info).remote_host = estrdup(request->remote_host);
-  // SG(request_info).remote_port = estrdup(request->remote_port);
-  // SG(request_info).remote_user = estrdup(request->remote_user);
-  // SG(request_info).server_port = estrdup(request->server_port);
-  // SG(request_info).script_name = estrdup(request->script_name);
-  // SG(request_info).php_auth_digest = estrdup(request->php_auth_digest);
-  // SG(request_info).php_auth_user = estrdup(request->php_auth_user);
-  // SG(request_info).php_auth_pw = estrdup(request->php_auth_pw);
-  // SG(request_info).auth_type = estrdup(request->auth_type);
-  // SG(request_info).path_info = estrdup(request->path_info);
+  SG(request_info).argc = 0;
+  SG(request_info).argv = NULL;
 
-  // SG(server_context) needs to be non-zero size because...reasons. ¯\_(ツ)_/¯
-  SG(server_context) = (void*)(1);  // Sigh.
+  // Reset state
+  SG(sapi_headers).http_response_code = 200;
 
-  // Needs to be set _after_ php_request_startup, also because reasons.
-  SG(request_info).proto_num = 110;
+  // Set up superglobals
+  SG(request_info).request_method = lh_request_method(request);
+
+  lh_url_t* url = lh_request_url(request);
+  SG(request_info).path_translated = (char*) lh_url_path(url);
+  SG(request_info).query_string = (char*) lh_url_query(url);
+  SG(request_info).request_uri = (char*) lh_url_uri(url);
+  // TODO: Add auth fields
+
+  // Could implement a PHP stream to do this?
+  // SG(request_info).request_body = lh_request_body(request);
+
+  lh_headers_t* headers = lh_request_headers(request);
+
+  const char* content_type = lh_headers_get(headers, "Content-Type");
+  if (content_type == NULL) {
+    SG(request_info).content_type = content_type;
+  }
+
+  const char* content_length = lh_headers_get(headers, "Content-Length");
+  if (content_length != NULL) {
+    SG(request_info).content_length = strtoll(content_length, NULL, 10);
+  }
+
+  const char* cookie = lh_headers_get(headers, "Cookie");
+  SG(request_info).cookie_data = (char*) cookie;
 
   // Start new request now that we've setup the environment fully.
   if (php_request_startup() == FAILURE) {
     return NULL;
   }
 
-  // php_embed_module.flush =
+  // Needs to be set _after_ php_request_startup, also because reasons.
+  SG(request_info).proto_num = 110;
 
   zval retval;
-  zend_try {
-    // size_t len = strlen(code);
-    // zend_eval_stringl_ex((char*)code, len, &retval, filename, true);
-
-    zend_eval_string((char*)code, NULL, filename);
+  zend_first_try {
+    printf("code: %s\n", code);
+    zend_eval_string_ex((char*)code, &retval, filename, false);
 
     if (EG(exception)) {
-      // Can't call zend_clear_exception because there isn't a current
-      // execution stack (ie, `EG(current_execute_data)`)
-      zend_object* e = EG(exception);
+      zval rv;
+      // TODO: Figure out why this fails.
+      zval *msg = zend_read_property_ex(zend_ce_exception, EG(exception), ZSTR_KNOWN(ZEND_STR_MESSAGE), /* silent */ false, &rv);
+      zend_printf("Exception: %s\n", Z_STRVAL_P(msg));
+      zend_object_release(EG(exception));
       EG(exception) = NULL;
-      // TODO: do something with the error...
-      zval_ptr_dtor((zval*)e);
     }
   } zend_catch {
     return NULL;
   } zend_end_try();
 
-  // Populate response fields
-  php_http_headers_push(&response->headers, "Content-Type", "text/plain");
-  php_http_response_set_status(response, SG(sapi_headers).http_response_code);
+  zend_try {
+    php_request_shutdown(NULL);
+  } zend_end_try();
+  clean_superglobals();
 
-  // TODO: Need to figure out how php://output works.
-  response->body = "Hello, World!";
+  // Reset headers to reuse for response object
+  lh_headers_free(headers);
+  headers = lh_headers_new();
 
-  return response;
+  const char* mime = SG(sapi_headers).mimetype;
+  if (mime == NULL) {
+    mime = "text/plain";
+  }
+  lh_headers_set(headers, "Content-Type", mime);
+
+  int status = SG(sapi_headers).http_response_code;
+  return lh_response_new(status, headers, "Hello, World!");
 }

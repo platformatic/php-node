@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     env,
     ffi::OsStr,
     fmt::{Debug, Display},
@@ -56,6 +56,8 @@ fn get_spc() -> PathBuf {
 }
 
 fn main() {
+    println!("cargo:rerun-if-changed=build.rs");
+
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
     let current_dir = env::current_dir().unwrap();
 
@@ -170,9 +172,11 @@ fn main() {
     let spc = get_spc();
     let spc_cmd = spc.to_str().unwrap();
 
-    // Skip download and build of PHP if a build is already present
-    // TODO: Probably need to detect modification date somehow...
-    if !current_dir.join("buildroot/lib/libphp.a").exists() {
+    let has_downloads = current_dir.join("downloads").exists();
+    let should_download = env::var("PHP_SHOULD_DOWNLOAD")
+        .map_or(!has_downloads, |s| s == "true");
+
+    if should_download {
         // Download PHP and requested extensions
         execute_command(&[
             spc_cmd,
@@ -181,16 +185,29 @@ fn main() {
             "--retry=10",
             "--prefer-pre-built",
             "--with-php=8.4"
-        ]);
+        ], None);
+    }
 
+    // TODO: Build if downloads modification time is more recent than libphp.a
+    let has_libphp = current_dir.join("buildroot/lib/libphp.a").exists();
+    let should_build = env::var("PHP_SHOULD_BUILD")
+        .map_or(!has_libphp, |s| s == "true");
+
+    if should_build {
+        let mut env = HashMap::new();
+        env.insert(
+            "SPC_CMD_PREFIX_PHP_CONFIGURE".to_string(),
+            "./configure --prefix= --with-valgrind=no --enable-shared=no --enable-static=yes --disable-all --disable-cgi --disable-phpdbg --enable-debug".to_string()
+        );
         // Build in embed mode
         execute_command(&[
             spc_cmd,
             "build",
             &extensions,
             "--build-embed",
-            // "--enable-zts"
-        ]);
+            "--enable-zts",
+            "--no-strip", // Keep debug symbols?
+        ], Some(env));
     }
 
     // Get the includes
@@ -199,7 +216,7 @@ fn main() {
         "spc-config",
         &extensions,
         "--includes"
-    ]);
+    ], None);
 
     // Get the libs
     let libs = execute_command(&[
@@ -207,10 +224,10 @@ fn main() {
         "spc-config",
         &extensions,
         "--libs"
-    ]);
+    ], None);
 
     // Include main headers
-    let includes = includes.split(' ').collect::<Vec<_>>();
+    let mut includes = includes.split(' ').collect::<Vec<_>>();
     for dir in includes.iter() {
         println!("cargo:include={}", &dir[2..]);
     }
@@ -237,6 +254,17 @@ fn main() {
         }
     }
 
+    let crate_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+
+    let lang_handler_include = crate_dir.join("../../target/release");
+
+    println!("cargo:rustc-link-search={}", lang_handler_include.display());
+    println!("cargo:rustc-link-lib=lang_handler");
+    println!("cargo:include={}", lang_handler_include.display());
+
+    let lang_handler_include_flag = format!("-I{}", lang_handler_include.display());
+    includes.push(lang_handler_include_flag.as_str());
+
     let mut builder = cc::Build::new();
     for include in &includes {
         builder.flag(include);
@@ -257,6 +285,12 @@ fn main() {
         .blocklist_function("zend_startup")
         // Block the `zend_random_bytes_insecure` because it fails checks.
         .blocklist_item("zend_random_bytes_insecure")
+        .opaque_type("lh_request_t")
+        .opaque_type("lh_response_t")
+        .opaque_type("lh_request_builder_t")
+        .opaque_type("lh_response_builder_t")
+        .opaque_type("lh_headers_t")
+        .opaque_type("lh_url_t")
         .clang_args(&includes)
         .derive_default(true);
 
@@ -275,8 +309,11 @@ fn main() {
         .expect("Unable to write output file");
 }
 
-fn execute_command<S: AsRef<OsStr> + Debug>(argv: &[S]) -> String {
+fn execute_command<S: AsRef<OsStr> + Debug>(argv: &[S], env: Option<HashMap<String, String>>) -> String {
     let mut command = Command::new(&argv[0]);
+    if let Some(env) = env {
+        command.envs(env);
+    }
     command.args(&argv[1..]);
 
     let result = command

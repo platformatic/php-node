@@ -1,0 +1,19 @@
+[package]
+edition = "2021"
+name = "lang_handler"
+version = "0.0.0"
+
+[lib]
+name = "lang_handler"
+crate-type = ["cdylib", "rlib"]
+path = "src/lib.rs"
+
+[features]
+default = []
+c = []
+
+[build-dependencies]
+cbindgen = "0.28.0"
+
+[dependencies]
+url = "2.5.4"
