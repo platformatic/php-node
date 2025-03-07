@@ -2,11 +2,21 @@ use php::{Embed, Request, Handler};
 
 pub fn main() {
     let code = "
-        http_response_code(404);
-        header('Content-Type: text/html');
+        http_response_code(123);
+
+        // foreach ($_SERVER as $name => $value) {
+        //     header(\"$name: $value\");
+        // }
+
+        echo file_get_contents(\"php://input\");
+
         print('hello');
         flush();
     ";
+    // let code = "
+    //     http_response_code(123);
+    //     echo $HTTP_RAW_POST_DATA;
+    // ";
     let filename = Some("test.php");
     let embed = Embed::new_with_args(code, filename, std::env::args());
     // let embed = Embed::new(code, filename);
@@ -26,7 +36,8 @@ pub fn main() {
     println!("body: {:?}", request.body());
     println!("");
 
-    let response = embed.handle(request.clone()).unwrap();
+    let response = embed.handle(request.clone())
+        .expect("failed to handle request");
 
     println!("\n=== response ===");
     println!("status: {:?}", response.status());
