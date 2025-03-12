@@ -191,7 +191,7 @@ fn main() {
     // TODO: Build if downloads modification time is more recent than libphp.a
     let has_libphp = current_dir.join("buildroot/lib/libphp.a").exists();
     let should_build = env::var("PHP_SHOULD_BUILD")
-        .map_or(!has_libphp, |s| s == "true");
+        .map_or(should_download || !has_libphp, |s| s == "true");
 
     if should_build {
         let mut env = HashMap::new();

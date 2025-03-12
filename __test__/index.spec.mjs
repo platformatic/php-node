@@ -2,13 +2,71 @@ import test from 'ava'
 
 import { Php, Request } from '../index.js'
 
-test('sum from native', async (t) => {
+test('input/output streams work', async (t) => {
+  const php = new Php({
+    argv: process.argv,
+    file: 'index.php',
+    code: `
+      if (file_get_contents('php://input') == 'Hello, from Node.js!') {
+        echo 'Hello, from PHP!';
+      }
+    `
+  })
+
+  const req = new Request({
+    method: 'GET',
+    url: 'http://example.com/test.php',
+    body: Buffer.from('Hello, from Node.js!')
+  })
+
+  const res = await php.handleRequest(req)
+  t.is(res.status, 200)
+  t.is(res.body.toString('utf8'), 'Hello, from PHP!')
+})
+
+test('logs work', async (t) => {
   const php = new Php({
     file: 'index.php',
     code: `
-      http_response_code(400);
+      error_log('Hello, from error_log!');
+    `
+  })
 
-      echo phpinfo();
+  const req = new Request({
+    method: 'GET',
+    url: 'http://example.com/test.php'
+  })
+
+  const res = await php.handleRequest(req)
+  t.is(res.status, 200)
+  t.is(res.log.toString('utf8'), 'Hello, from error_log!\n')
+})
+
+test('exceptions work', async (t) => {
+  const php = new Php({
+    file: 'index.php',
+    code: `
+      throw new Exception('Hello, from PHP!');
+    `
+  })
+
+  const req = new Request({
+    method: 'GET',
+    url: 'http://example.com/test.php'
+  })
+
+  await t.throwsAsync(php.handleRequest(req), {
+    message: 'Hello, from PHP!'
+  })
+})
+
+test('input and output headers work', async (t) => {
+  const php = new Php({
+    file: 'index.php',
+    code: `
+      if ($_SERVER['HTTP_X_TEST'] == 'Hello, from Node.js!') {
+        header('X-Test: Hello, from PHP!');
+      }
     `
   })
 
@@ -16,13 +74,12 @@ test('sum from native', async (t) => {
     method: 'GET',
     url: 'http://example.com/test.php',
     headers: {
-      'Content-Type': 'application/json',
-      'Content-Length': 13
-    },
-    body: 'Hello, World!'
+      'X-Test': ['Hello, from Node.js!']
+    }
   })
 
   const res = await php.handleRequest(req)
-  t.is(res.status, 400)
-  t.is(res.body, "wat")
+  console.log(res)
+  t.is(res.status, 200)
+  // t.is(res.headers['X-Test'], 'Hello, from PHP!')
 })

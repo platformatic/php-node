@@ -88,6 +88,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@platformatic/php@workspace:.":
+  version: 0.0.0-use.local
+  resolution: "@platformatic/php@workspace:."
+  dependencies:
+    "@napi-rs/cli": "npm:^2.18.4"
+    ava: "npm:^6.0.1"
+  languageName: unknown
+  linkType: soft
+
 "@rollup/pluginutils@npm:^5.1.3":
   version: 5.1.4
   resolution: "@rollup/pluginutils@npm:5.1.4"
@@ -1170,15 +1179,6 @@ __metadata:
   checksum: 10c0/e8f4b15111bf483900c75609e5e74e3fcb79f2ddb73e41470028fcd3e4b5162ec65da9907be077ee5012c18801ff7fffb35f9f37a077f3f81d85a0b7d6578efd
   languageName: node
   linkType: hard
-
-"php-stackable@workspace:.":
-  version: 0.0.0-use.local
-  resolution: "php-stackable@workspace:."
-  dependencies:
-    "@napi-rs/cli": "npm:^2.18.4"
-    ava: "npm:^6.0.1"
-  languageName: unknown
-  linkType: soft
 
 "picomatch@npm:^2.3.1":
   version: 2.3.1

@@ -1,6 +1,9 @@
 #[macro_use]
 extern crate napi_derive;
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use napi::{Error, Task, Env, Result};
 use napi::bindgen_prelude::*;
 
@@ -82,10 +85,10 @@ impl PhpHeaders {
 #[napi(object)]
 #[derive(Default)]
 pub struct PhpRequestOptions {
-  pub method: Option<String>,
-  pub url: Option<String>,
-  pub headers: Option<Object>,
-  pub body: Option<String>
+  pub method: String,
+  pub url: String,
+  pub headers: Option<HashMap<String, Vec<String>>>,
+  pub body: Option<Uint8Array>
 }
 
 #[napi(js_name = "Request")]
@@ -96,29 +99,24 @@ pub struct PhpRequest {
 #[napi]
 impl PhpRequest {
     #[napi(constructor)]
-    pub fn new(options: Option<PhpRequestOptions>) -> Self {
-        let opts = options.unwrap_or_default();
-        let mut builder: RequestBuilder = Request::builder();
+    pub fn new(options: PhpRequestOptions) -> Self {
+        let mut builder: RequestBuilder = Request::builder()
+            .method(options.method)
+            .url(options.url).expect("invalid url");
 
-        if let Some(method) = opts.method {
-            builder = builder.method(method)
-        }
+        if let Some(headers) = options.headers {
+            for key in headers.keys() {
+                let values = headers.get(key)
+                    .expect(format!("missing header values for key: {}", key).as_str());
 
-        if let Some(url) = opts.url {
-            builder = builder.url(url).expect("invalid url")
-        }
-
-        if let Some(headers) = opts.headers {
-            for key in Object::keys(&headers).unwrap() {
-                let values: Vec<String> = headers.get(&key).unwrap().unwrap();
                 for value in values {
                     builder = builder.header(key.clone(), value.clone())
                 }
             }
         }
 
-        if let Some(body) = opts.body {
-            builder = builder.body(body)
+        if let Some(body) = options.body {
+            builder = builder.body(body.as_ref())
         }
 
         PhpRequest {
@@ -147,11 +145,11 @@ impl PhpRequest {
     }
 
     #[napi(getter, enumerable = true)]
-    pub fn body(&self) -> String {
+    pub fn body(&self) -> Buffer {
         self.request
             .body()
-            .map(|v| v.to_owned())
-            .unwrap_or_default()
+            .to_vec()
+            .into()
     }
 }
 
@@ -164,33 +162,47 @@ impl PhpRequest {
 #[napi(object)]
 #[derive(Clone, Default)]
 pub struct PhpOptions {
+    pub argv: Option<Vec<String>>,
     pub code: String,
     pub file: Option<String>
 }
 
 #[napi]
 pub struct Php {
-    pub options: PhpOptions
+    embed: Arc<Embed>
 }
 
 #[napi]
 impl Php {
     #[napi(constructor)]
     pub fn new(options: PhpOptions) -> Self {
-        Php { options }
+        let code = options.code.clone();
+        let filename = options.file.clone();
+        let argv = options.argv.clone();
+
+        // TODO: Need to figure out how to send an Embed across threads
+        // so we can reuse the same Embed instance for multiple requests.
+        let embed = match argv {
+            Some(argv) => Embed::new_with_argv(code, filename, argv),
+            None => Embed::new(code, filename)
+        };
+
+        Php {
+            embed: Arc::new(embed)
+        }
     }
 
     #[napi]
     pub fn handle_request(&self, request: &PhpRequest) -> AsyncTask<PhpRequestTask> {
         AsyncTask::new(PhpRequestTask {
-            options: self.options.clone(),
+            embed: self.embed.clone(),
             request: request.to_inner()
         })
     }
 }
 
 pub struct PhpRequestTask {
-    options: PhpOptions,
+    embed: Arc<Embed>,
     request: Request
 }
 
@@ -199,18 +211,16 @@ impl Task for PhpRequestTask {
     type JsValue = PhpResponse;
 
     fn compute(&mut self) -> Result<Self::Output> {
-        let code = self.options.code.clone();
-        let filename = self.options.file.clone();
-        // TODO: Need to figure out how to send an Embed across threads
-        // so we can reuse the same Embed instance for multiple requests.
-        let embed = Embed::new(code, filename);
-
-        embed
+        self.embed
             .handle(self.request.clone())
             .map_err(|err| Error::from_reason(err))
     }
 
     fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+        if let Some(exception) = output.exception() {
+            return Err(Error::from_reason(exception.to_owned()))
+        }
+
         Ok(PhpResponse {
             response: output
         })
@@ -237,7 +247,23 @@ impl PhpResponse {
     }
 
     #[napi(getter, enumerable = true)]
-    pub fn body(&self) -> String {
-        self.response.body().to_owned()
+    pub fn body(&self) -> Buffer {
+        self.response
+            .body()
+            .to_vec()
+            .into()
+    }
+
+    #[napi(getter, enumerable = true)]
+    pub fn log(&self) -> Buffer {
+        self.response
+            .log()
+            .to_vec()
+            .into()
+    }
+
+    #[napi(getter, enumerable = true)]
+    pub fn exception(&self) -> Option<String> {
+        self.response.exception().map(|v| v.to_owned())
     }
 }
