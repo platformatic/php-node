@@ -1,6 +1,7 @@
 #[cfg(feature = "c")]
 use std::{ffi, ffi::{CStr, CString}};
 
+use bytes::{Buf, Bytes, BytesMut};
 use url::{ParseError, Url};
 
 use crate::Headers;
@@ -13,16 +14,16 @@ pub struct Request {
     url: Url,
     headers: Headers,
     // TODO: Support Stream bodies when napi.rs supports it
-    body: Option<String>,
+    body: Bytes,
 }
 
 impl Request {
-    pub fn new(method: String, url: Url, headers: Headers, body: Option<String>) -> Self {
+    pub fn new<T: Into<Bytes>>(method: String, url: Url, headers: Headers, body: T) -> Self {
         Self {
             method,
             url,
             headers,
-            body
+            body: body.into()
         }
     }
 
@@ -46,8 +47,8 @@ impl Request {
         &self.headers
     }
 
-    pub fn body(&self) -> Option<&String> {
-        self.body.as_ref()
+    pub fn body(&self) -> Bytes {
+        self.body.clone()
     }
 }
 
@@ -56,7 +57,7 @@ pub struct RequestBuilder {
     method: Option<String>,
     url: Option<Url>,
     headers: Headers,
-    body: Option<String>,
+    body: BytesMut,
 }
 
 impl RequestBuilder {
@@ -65,7 +66,7 @@ impl RequestBuilder {
             method: None,
             url: None,
             headers: Headers::new(),
-            body: None,
+            body: BytesMut::with_capacity(1024),
         }
     }
 
@@ -74,7 +75,7 @@ impl RequestBuilder {
             method: Some(request.method().into()),
             url: Some(request.url().clone()),
             headers: request.headers().clone(),
-            body: request.body().map(|b| b.into()),
+            body: BytesMut::from(request.body()),
         }
     }
 
@@ -105,8 +106,8 @@ impl RequestBuilder {
         self
     }
 
-    pub fn body<T: Into<String>>(mut self, body: T) -> Self {
-        self.body = Some(body.into());
+    pub fn body<T: Into<BytesMut>>(mut self, body: T) -> Self {
+        self.body = body.into();
         self
     }
 
@@ -115,7 +116,7 @@ impl RequestBuilder {
             method: self.method.unwrap_or_else(|| "GET".to_string()),
             url: self.url.unwrap_or_else(|| Url::parse("/").unwrap()),
             headers: self.headers,
-            body: self.body,
+            body: self.body.freeze(),
         }
     }
 }
@@ -151,10 +152,10 @@ pub extern "C" fn lh_request_new(
     let body = if body.is_null() {
         None
     } else {
-        Some(unsafe { CStr::from_ptr(body).to_string_lossy().into_owned() })
+        Some(unsafe { CStr::from_ptr(body).to_bytes() })
     };
     let headers = unsafe { &*headers };
-    let request = Request::new(method, url, headers.into(), body);
+    let request = Request::new(method, url, headers.into(), body.unwrap_or(&[]));
     Box::into_raw(Box::new(request.into()))
 }
 
@@ -183,10 +184,22 @@ pub extern "C" fn lh_request_headers(request: *const lh_request_t) -> *mut lh_he
 #[no_mangle]
 pub extern "C" fn lh_request_body(request: *const lh_request_t) -> *const ffi::c_char {
     let request = unsafe { &*request };
-    match request.inner.body() {
-        Some(body) => CString::new(body.as_str().as_bytes()).unwrap().into_raw(),
-        None => std::ptr::null(),
+    CString::new(request.inner.body()).unwrap().into_raw()
+}
+
+#[cfg(feature = "c")]
+#[no_mangle]
+pub extern "C" fn lh_request_body_read(request: *const lh_request_t, buffer: *mut ffi::c_char, length: usize) -> usize {
+    let request = unsafe { &*request };
+    let body = request.inner.body();
+
+    let length = length.min(body.len());
+    let chunk = body.take(length);
+
+    unsafe {
+        std::ptr::copy_nonoverlapping(chunk.chunk().as_ptr() as *mut ffi::c_char, buffer, length);
     }
+    length
 }
 
 #[cfg(feature = "c")]
@@ -270,7 +283,7 @@ pub extern "C" fn lh_request_builder_body(
     builder: *mut lh_request_builder_t,
     body: *const ffi::c_char,
 ) -> *mut lh_request_builder_t {
-    let body = unsafe { CStr::from_ptr(body).to_string_lossy().into_owned() };
+    let body = unsafe { CStr::from_ptr(body).to_bytes() };
     let builder = unsafe { &mut *builder };
     Box::into_raw(Box::new(builder.inner.clone().body(body).into()))
 }

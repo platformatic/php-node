@@ -1,6 +1,8 @@
 #[cfg(feature = "c")]
 use std::ffi::{CStr, CString, c_char};
 
+use bytes::{Bytes, BytesMut, BufMut};
+
 use crate::Headers;
 use crate::headers::lh_headers_t;
 
@@ -9,15 +11,23 @@ pub struct Response {
     status: u16,
     headers: Headers,
     // TODO: Support Stream bodies when napi.rs supports it
-    body: String,
+    body: Bytes,
+    log: Bytes,
+    exception: Option<String>,
 }
 
 impl Response {
-    pub fn new(status: u16, headers: Headers, body: String) -> Self {
+    pub fn new<B, L>(status: u16, headers: Headers, body: B, log: L, exception: Option<String>) -> Self
+    where
+        B: Into<Bytes>,
+        L: Into<Bytes>
+    {
         Self {
             status,
             headers,
-            body,
+            body: body.into(),
+            log: log.into(),
+            exception
         }
     }
 
@@ -37,8 +47,16 @@ impl Response {
         &self.headers
     }
 
-    pub fn body(&self) -> &String {
-        &self.body
+    pub fn body(&self) -> Bytes {
+        self.body.clone()
+    }
+
+    pub fn log(&self) -> Bytes {
+        self.log.clone()
+    }
+
+    pub fn exception(&self) -> Option<&String> {
+        self.exception.as_ref()
     }
 }
 
@@ -46,7 +64,9 @@ impl Response {
 pub struct ResponseBuilder {
     status: Option<u16>,
     headers: Headers,
-    body: Option<String>,
+    body: BytesMut,
+    log: BytesMut,
+    exception: Option<String>,
 }
 
 impl ResponseBuilder {
@@ -54,7 +74,9 @@ impl ResponseBuilder {
         ResponseBuilder {
             status: None,
             headers: Headers::new(),
-            body: None,
+            body: BytesMut::with_capacity(1024),
+            log: BytesMut::with_capacity(1024),
+            exception: None,
         }
     }
 
@@ -62,7 +84,9 @@ impl ResponseBuilder {
         ResponseBuilder {
             status: Some(response.status),
             headers: response.headers.clone(),
-            body: Some(response.body.clone()),
+            body: BytesMut::from(response.body()),
+            log: BytesMut::from(response.log()),
+            exception: response.exception.clone(),
         }
     }
 
@@ -80,11 +104,18 @@ impl ResponseBuilder {
         self
     }
 
-    pub fn body<B>(&mut self, body: B) -> &mut Self
-    where
-        B: Into<String>,
-    {
-        self.body = Some(body.into());
+    pub fn body<B: Into<BytesMut>>(&mut self, body: B) -> &mut Self {
+        self.body = body.into();
+        self
+    }
+
+    pub fn log<L: Into<BytesMut>>(&mut self, log: L) -> &mut Self {
+        self.log = log.into();
+        self
+    }
+
+    pub fn exception<E: Into<String>>(&mut self, exception: E) -> &mut Self {
+        self.exception = Some(exception.into());
         self
     }
 
@@ -92,7 +123,9 @@ impl ResponseBuilder {
         Response {
             status: self.status.unwrap_or(200),
             headers: self.headers.clone(),
-            body: self.body.clone().unwrap_or_default(),
+            body: self.body.clone().freeze(),
+            log: self.log.clone().freeze(),
+            exception: self.exception.clone(),
         }
     }
 }
@@ -114,13 +147,13 @@ impl From<&lh_response_t> for Response {
     }
 }
 
-#[cfg(feature = "c")]
-#[no_mangle]
-pub extern "C" fn lh_response_new(status_code: u16, headers: *mut lh_headers_t, body: *const c_char) -> *mut lh_response_t {
-    let body_str = unsafe { CStr::from_ptr(body).to_string_lossy().into_owned() };
-    let headers = unsafe { &*headers };
-    Box::into_raw(Box::new(Response::new(status_code, headers.into(), body_str).into()))
-}
+// #[cfg(feature = "c")]
+// #[no_mangle]
+// pub extern "C" fn lh_response_new(status_code: u16, headers: *mut lh_headers_t, body: *const c_char) -> *mut lh_response_t {
+//     let body_str = unsafe { CStr::from_ptr(body).to_bytes() };
+//     let headers = unsafe { &*headers };
+//     Box::into_raw(Box::new(Response::new(status_code, headers.into(), body_str).into()))
+// }
 
 #[cfg(feature = "c")]
 #[no_mangle]
@@ -150,7 +183,7 @@ pub extern "C" fn lh_response_headers(response: *const lh_response_t) -> *mut lh
 #[no_mangle]
 pub extern "C" fn lh_response_body(response: *const lh_response_t) -> *const c_char {
     let response = unsafe { &*response };
-    CString::new(response.inner.body().as_str().as_bytes()).unwrap().into_raw()
+    CString::new(response.inner.body()).unwrap().into_raw()
 }
 
 #[allow(non_camel_case_types)]
@@ -203,8 +236,35 @@ pub extern "C" fn lh_response_builder_header(builder: *mut lh_response_builder_t
 #[no_mangle]
 pub extern "C" fn lh_response_builder_body(builder: *mut lh_response_builder_t, body: *const c_char) {
     let builder = unsafe { &mut *builder };
-    let body_str = unsafe { CStr::from_ptr(body).to_string_lossy().into_owned() };
+    let body_str = unsafe { CStr::from_ptr(body).to_bytes() };
     builder.inner.body(body_str);
+}
+
+#[cfg(feature = "c")]
+#[no_mangle]
+pub extern "C" fn lh_response_builder_body_write(builder: *mut lh_response_builder_t, data: *const c_char, len: usize) -> usize {
+    let builder = unsafe { &mut *builder };
+    let data = unsafe { std::slice::from_raw_parts(data as *const u8, len) };
+    builder.inner.body.put(data);
+    return len;
+}
+
+#[cfg(feature = "c")]
+#[no_mangle]
+pub extern "C" fn lh_response_builder_log_write(builder: *mut lh_response_builder_t, data: *const c_char, len: usize) -> usize {
+    let builder = unsafe { &mut *builder };
+    let data = unsafe { std::slice::from_raw_parts(data as *const u8, len) };
+    builder.inner.log.put(data);
+    builder.inner.log.put("\n".as_bytes());
+    return len;
+}
+
+#[cfg(feature = "c")]
+#[no_mangle]
+pub extern "C" fn lh_response_builder_exception(builder: *mut lh_response_builder_t, exception: *const c_char) {
+    let builder = unsafe { &mut *builder };
+    let exception_str = unsafe { CStr::from_ptr(exception).to_string_lossy().into_owned() };
+    builder.inner.exception(exception_str);
 }
 
 #[cfg(feature = "c")]

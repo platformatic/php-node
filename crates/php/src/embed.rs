@@ -1,4 +1,8 @@
-use std::{env::Args, ffi::{c_void, c_char, CStr, CString}};
+use std::{
+    env::Args,
+    ffi::{c_void, c_char, CStr, CString}
+};
+use std::sync::OnceLock;
 
 use lang_handler::{Handler, Request, Response};
 
@@ -12,6 +16,37 @@ pub struct Embed {
 
 unsafe impl Send for Embed {}
 unsafe impl Sync for Embed {}
+
+struct PhpInit;
+
+impl PhpInit {
+    pub fn new<S>(argv: Vec<S>) -> Self
+    where
+        S: AsRef<str>
+    {
+        let argv: Vec<&str> = argv.iter().map(|s| s.as_ref()).collect();
+        let argc = argv.len() as i32;
+        let mut argv_ptrs = argv
+            .iter()
+            .map(|v| v.as_ptr() as *mut c_char)
+            .collect::<Vec<*mut c_char>>();
+
+        unsafe {
+            sys::php_http_init(argc, argv_ptrs.as_mut_ptr());
+        }
+        PhpInit
+    }
+}
+
+impl Drop for PhpInit {
+    fn drop(&mut self) {
+        unsafe {
+            sys::php_http_destruct();
+        }
+    }
+}
+
+static PHP_INIT: OnceLock<PhpInit> = OnceLock::new();
 
 impl Embed {
     pub fn new<C, F>(code: C, filename: Option<F>) -> Self
@@ -27,42 +62,20 @@ impl Embed {
         C: Into<String>,
         F: Into<String>
     {
-        let argv: Vec<String> = args.collect();
-        Embed::new_with_argv(code, filename, argv)
+        Embed::new_with_argv(code, filename, args.collect())
     }
 
     pub fn new_with_argv<C, F, S>(code: C, filename: Option<F>, argv: Vec<S>) -> Self
     where
         C: Into<String>,
         F: Into<String>,
-        S: AsRef<str>,
+        S: AsRef<str> + std::fmt::Debug,
     {
-        let argc = argv.len() as i32;
-        let argv = argv
-            .into_iter()
-            .map(|v| CString::new(v.as_ref()).unwrap())
-            .collect::<Vec<_>>();
-
-        let mut argv_ptrs = argv
-            .iter()
-            .map(|v| v.as_ptr() as *mut c_char)
-            .collect::<Vec<*mut c_char>>();
-
-        unsafe {
-            sys::php_http_init(argc, argv_ptrs.as_mut_ptr());
-        }
+        PHP_INIT.get_or_init(|| PhpInit::new(argv));
 
         Embed {
             code: code.into(),
-            filename: filename.map(|v| v.into()),
-        }
-    }
-}
-
-impl Drop for Embed {
-    fn drop(&mut self) {
-        unsafe {
-            sys::php_http_shutdown();
+            filename: filename.map(|v| v.into())
         }
     }
 }
