@@ -60,12 +60,20 @@ test('exceptions work', async (t) => {
   })
 })
 
-test('input and output headers work', async (t) => {
+test('request headers work', async (t) => {
   const php = new Php({
     file: 'index.php',
     code: `
-      if ($_SERVER['HTTP_X_TEST'] == 'Hello, from Node.js!') {
-        header('X-Test: Hello, from PHP!');
+      foreach($_SERVER as $key => $val) {
+        if ($key == 'argv') {
+          for ($i = 0; $i < count($val); $i++) {
+            $arg = $val[$i];
+            echo "argv[$i]: $arg\n";
+          }
+          continue;
+        }
+
+        echo "$key: $val\n";
       }
     `
   })
@@ -81,5 +89,5 @@ test('input and output headers work', async (t) => {
   const res = await php.handleRequest(req)
   console.log(res)
   t.is(res.status, 200)
-  // t.is(res.headers['X-Test'], 'Hello, from PHP!')
+  t.is(res.body.toString(), 'Hello, from PHP!')
 })
