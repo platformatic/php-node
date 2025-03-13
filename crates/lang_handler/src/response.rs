@@ -1,11 +1,24 @@
-#[cfg(feature = "c")]
-use std::ffi::{CStr, CString, c_char};
-
-use bytes::{Bytes, BytesMut, BufMut};
+use bytes::{Bytes, BytesMut};
 
 use crate::Headers;
-use crate::headers::lh_headers_t;
 
+/// Represents an HTTP response. This includes the status code, headers, body, log, and exception.
+///
+/// # Example
+///
+/// ```
+/// use lang_handler::{Response, ResponseBuilder};
+///
+/// let response = Response::builder()
+///   .status(200)
+///   .header("Content-Type", "text/plain")
+///   .body("Hello, World!")
+///   .build();
+///
+/// assert_eq!(response.status(), 200);
+/// assert_eq!(response.headers().get("Content-Type"), Some(&vec!["text/plain".to_string()]));
+/// assert_eq!(response.body(), "Hello, World!");
+/// ```
 #[derive(Clone, Debug)]
 pub struct Response {
     status: u16,
@@ -17,6 +30,24 @@ pub struct Response {
 }
 
 impl Response {
+    /// Creates a new response with the given status code, headers, body, log, and exception.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use lang_handler::{Response, Headers};
+    ///
+    /// let mut headers = Headers::new();
+    /// headers.set("Content-Type", "text/plain");
+    ///
+    /// let response = Response::new(200, headers, "Hello, World!", "log", Some("exception".to_string()));
+    ///
+    /// assert_eq!(response.status(), 200);
+    /// assert_eq!(response.headers().get("Content-Type"), Some(&vec!["text/plain".to_string()]));
+    /// assert_eq!(response.body(), "Hello, World!");
+    /// assert_eq!(response.log(), "log");
+    /// assert_eq!(response.exception(), Some(&"exception".to_string()));
+    /// ```
     pub fn new<B, L>(status: u16, headers: Headers, body: B, log: L, exception: Option<String>) -> Self
     where
         B: Into<Bytes>,
@@ -31,45 +62,178 @@ impl Response {
         }
     }
 
+    /// Creates a new response builder.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use lang_handler::Response;
+    ///
+    /// let response = Response::builder()
+    ///   .status(200)
+    ///   .header("Content-Type", "text/plain")
+    ///   .body("Hello, World!")
+    ///   .build();
+    ///
+    /// assert_eq!(response.status(), 200);
+    /// assert_eq!(response.headers().get("Content-Type"), Some(&vec!["text/plain".to_string()]));
+    /// assert_eq!(response.body(), "Hello, World!");
+    /// ```
     pub fn builder() -> ResponseBuilder {
         ResponseBuilder::new()
     }
 
+    /// Create a new response builder that extends the given response.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use lang_handler::{Response, ResponseBuilder};
+    ///
+    /// let response = Response::builder()
+    ///   .status(200)
+    ///   .header("Content-Type", "text/plain")
+    ///   .body("Hello, World!")
+    ///   .build();
+    ///
+    /// let extended = response.extend()
+    ///   .status(201)
+    ///   .build();
+    ///
+    /// assert_eq!(extended.status(), 201);
+    /// assert_eq!(extended.headers().get("Content-Type"), Some(&vec!["text/plain".to_string()]));
+    /// assert_eq!(extended.body(), "Hello, World!");
+    /// ```
     pub fn extend(&self) -> ResponseBuilder {
         ResponseBuilder::extend(self)
     }
 
+    /// Returns the status code of the response.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use lang_handler::Response;
+    ///
+    /// let response = Response::builder()
+    ///   .status(200)
+    ///   .build();
+    ///
+    /// assert_eq!(response.status(), 200);
+    /// ```
     pub fn status(&self) -> u16 {
         self.status
     }
 
+    /// Returns the headers of the response.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use lang_handler::{Response, Headers};
+    ///
+    /// let response = Response::builder()
+    ///   .status(200)
+    ///   .header("Content-Type", "text/plain")
+    ///   .build();
+    ///
+    /// assert_eq!(response.headers().get("Content-Type"), Some(&vec!["text/plain".to_string()]));
+    /// ```
     pub fn headers(&self) -> &Headers {
         &self.headers
     }
 
+    /// Returns the body of the response.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use lang_handler::Response;
+    ///
+    /// let response = Response::builder()
+    ///   .status(200)
+    ///   .body("Hello, World!")
+    ///   .build();
+    ///
+    /// assert_eq!(response.body(), "Hello, World!");
+    /// ```
     pub fn body(&self) -> Bytes {
         self.body.clone()
     }
 
+    /// Returns the log of the response.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use lang_handler::Response;
+    ///
+    /// let response = Response::builder()
+    ///   .status(200)
+    ///   .log("log")
+    ///   .build();
+    ///
+    /// assert_eq!(response.log(), "log");
+    /// ```
     pub fn log(&self) -> Bytes {
         self.log.clone()
     }
 
+    /// Returns the exception of the response.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use lang_handler::Response;
+    ///
+    /// let response = Response::builder()
+    ///   .status(200)
+    ///   .exception("exception")
+    ///   .build();
+    ///
+    /// assert_eq!(response.exception(), Some(&"exception".to_string()));
+    /// ```
     pub fn exception(&self) -> Option<&String> {
         self.exception.as_ref()
     }
 }
 
+/// A builder for creating an HTTP response.
+///
+/// # Example
+///
+/// ```
+/// use lang_handler::{Response, ResponseBuilder};
+///
+/// let response = Response::builder()
+///   .status(200)
+///   .header("Content-Type", "text/plain")
+///   .body("Hello, World!")
+///   .build();
+///
+/// assert_eq!(response.status(), 200);
+/// assert_eq!(response.headers().get("Content-Type"), Some(&vec!["text/plain".to_string()]));
+/// assert_eq!(response.body(), "Hello, World!");
+/// ```
 #[derive(Clone)]
 pub struct ResponseBuilder {
     status: Option<u16>,
     headers: Headers,
-    body: BytesMut,
-    log: BytesMut,
+    pub(crate) body: BytesMut,
+    pub(crate) log: BytesMut,
     exception: Option<String>,
 }
 
 impl ResponseBuilder {
+    /// Creates a new response builder.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use lang_handler::ResponseBuilder;
+    ///
+    /// let builder = ResponseBuilder::new();
+    /// ```
     pub fn new() -> Self {
         ResponseBuilder {
             status: None,
@@ -80,6 +244,27 @@ impl ResponseBuilder {
         }
     }
 
+    /// Creates a new response builder that extends the given response.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use lang_handler::{Response, ResponseBuilder};
+    ///
+    /// let response = Response::builder()
+    ///   .status(200)
+    ///   .header("Content-Type", "text/plain")
+    ///   .body("Hello, World!")
+    ///   .build();
+    ///
+    /// let extended = response.extend()
+    ///   .status(201)
+    ///   .build();
+    ///
+    /// assert_eq!(extended.status(), 201);
+    /// assert_eq!(extended.headers().get("Content-Type"), Some(&vec!["text/plain".to_string()]));
+    /// assert_eq!(extended.body(), "Hello, World!");
+    /// ```
     pub fn extend(response: &Response) -> Self {
         ResponseBuilder {
             status: Some(response.status),
@@ -90,11 +275,37 @@ impl ResponseBuilder {
         }
     }
 
-    pub fn status_code(&mut self, status: u16) -> &mut Self {
+    /// Sets the status code of the response.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use lang_handler::ResponseBuilder;
+    ///
+    /// let response = ResponseBuilder::new()
+    ///   .status(300)
+    ///   .build();
+    ///
+    /// assert_eq!(response.status(), 300);
+    /// ```
+    pub fn status(&mut self, status: u16) -> &mut Self {
         self.status = Some(status);
         self
     }
 
+    /// Sets the headers of the response.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use lang_handler::ResponseBuilder;
+    ///
+    /// let response = ResponseBuilder::new()
+    ///   .header("Content-Type", "text/plain")
+    ///   .build();
+    ///
+    /// assert_eq!(response.headers().get("Content-Type"), Some(&vec!["text/plain".to_string()]));
+    /// ```
     pub fn header<K, V>(&mut self, key: K, value: V) -> &mut Self
     where
         K: Into<String>,
@@ -104,21 +315,75 @@ impl ResponseBuilder {
         self
     }
 
+    /// Sets the body of the response.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use lang_handler::ResponseBuilder;
+    ///
+    /// let builder = ResponseBuilder::new()
+    ///   .body("Hello, World!")
+    ///   .build();
+    ///
+    /// assert_eq!(builder.body(), "Hello, World!");
+    /// ```
     pub fn body<B: Into<BytesMut>>(&mut self, body: B) -> &mut Self {
         self.body = body.into();
         self
     }
 
+    /// Sets the log of the response.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use lang_handler::ResponseBuilder;
+    ///
+    /// let builder = ResponseBuilder::new()
+    ///   .log("log")
+    ///   .build();
+    ///
+    /// assert_eq!(builder.log(), "log");
+    /// ```
     pub fn log<L: Into<BytesMut>>(&mut self, log: L) -> &mut Self {
         self.log = log.into();
         self
     }
 
+    /// Sets the exception of the response.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use lang_handler::ResponseBuilder;
+    ///
+    /// let builder = ResponseBuilder::new()
+    ///   .exception("exception")
+    ///   .build();
+    ///
+    /// assert_eq!(builder.exception(), Some(&"exception".to_string()));
+    /// ```
     pub fn exception<E: Into<String>>(&mut self, exception: E) -> &mut Self {
         self.exception = Some(exception.into());
         self
     }
 
+    /// Builds the response.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use lang_handler::ResponseBuilder;
+    ///
+    /// let response = ResponseBuilder::new()
+    ///   .build();
+    ///
+    /// assert_eq!(response.status(), 200);
+    /// assert_eq!(response.body(), "");
+    /// assert_eq!(response.log(), "");
+    /// assert_eq!(response.exception(), None);
+    /// ```
     pub fn build(&self) -> Response {
         Response {
             status: self.status.unwrap_or(200),
@@ -128,148 +393,4 @@ impl ResponseBuilder {
             exception: self.exception.clone(),
         }
     }
-}
-
-#[allow(non_camel_case_types)]
-pub struct lh_response_t {
-    inner: Response,
-}
-
-impl From<Response> for lh_response_t {
-    fn from(inner: Response) -> Self {
-        Self { inner }
-    }
-}
-
-impl From<&lh_response_t> for Response {
-    fn from(response: &lh_response_t) -> Response {
-        response.inner.clone()
-    }
-}
-
-// #[cfg(feature = "c")]
-// #[no_mangle]
-// pub extern "C" fn lh_response_new(status_code: u16, headers: *mut lh_headers_t, body: *const c_char) -> *mut lh_response_t {
-//     let body_str = unsafe { CStr::from_ptr(body).to_bytes() };
-//     let headers = unsafe { &*headers };
-//     Box::into_raw(Box::new(Response::new(status_code, headers.into(), body_str).into()))
-// }
-
-#[cfg(feature = "c")]
-#[no_mangle]
-pub extern "C" fn lh_response_free(response: *mut lh_response_t) {
-    if !response.is_null() {
-        unsafe {
-            drop(Box::from_raw(response));
-        }
-    }
-}
-
-#[cfg(feature = "c")]
-#[no_mangle]
-pub extern "C" fn lh_response_status(response: *const lh_response_t) -> u16 {
-    let response = unsafe { &*response };
-    response.inner.status()
-}
-
-#[cfg(feature = "c")]
-#[no_mangle]
-pub extern "C" fn lh_response_headers(response: *const lh_response_t) -> *mut lh_headers_t {
-    let response = unsafe { &*response };
-    Box::into_raw(Box::new(response.inner.headers().clone().into()))
-}
-
-#[cfg(feature = "c")]
-#[no_mangle]
-pub extern "C" fn lh_response_body(response: *const lh_response_t) -> *const c_char {
-    let response = unsafe { &*response };
-    CString::new(response.inner.body()).unwrap().into_raw()
-}
-
-#[allow(non_camel_case_types)]
-pub struct lh_response_builder_t {
-    inner: ResponseBuilder,
-}
-
-impl From<ResponseBuilder> for lh_response_builder_t {
-    fn from(inner: ResponseBuilder) -> Self {
-        Self { inner }
-    }
-}
-
-impl From<&lh_response_builder_t> for ResponseBuilder {
-    fn from(builder: &lh_response_builder_t) -> ResponseBuilder {
-        builder.inner.clone()
-    }
-}
-
-#[cfg(feature = "c")]
-#[no_mangle]
-pub extern "C" fn lh_response_builder_new() -> *mut lh_response_builder_t {
-    Box::into_raw(Box::new(ResponseBuilder::new().into()))
-}
-
-#[cfg(feature = "c")]
-#[no_mangle]
-pub extern "C" fn lh_response_builder_extend(response: *const lh_response_t) -> *mut lh_response_builder_t {
-    let response = unsafe { &*response };
-    Box::into_raw(Box::new(ResponseBuilder::extend(&response.inner).into()))
-}
-
-#[cfg(feature = "c")]
-#[no_mangle]
-pub extern "C" fn lh_response_builder_status_code(builder: *mut lh_response_builder_t, status_code: u16) {
-    let builder = unsafe { &mut *builder };
-    builder.inner.status_code(status_code);
-}
-
-#[cfg(feature = "c")]
-#[no_mangle]
-pub extern "C" fn lh_response_builder_header(builder: *mut lh_response_builder_t, key: *const c_char, value: *const c_char) {
-    let builder = unsafe { &mut *builder };
-    let key_str = unsafe { CStr::from_ptr(key).to_string_lossy().into_owned() };
-    let value_str = unsafe { CStr::from_ptr(value).to_string_lossy().into_owned() };
-    builder.inner.header(key_str, value_str);
-}
-
-#[cfg(feature = "c")]
-#[no_mangle]
-pub extern "C" fn lh_response_builder_body(builder: *mut lh_response_builder_t, body: *const c_char) {
-    let builder = unsafe { &mut *builder };
-    let body_str = unsafe { CStr::from_ptr(body).to_bytes() };
-    builder.inner.body(body_str);
-}
-
-#[cfg(feature = "c")]
-#[no_mangle]
-pub extern "C" fn lh_response_builder_body_write(builder: *mut lh_response_builder_t, data: *const c_char, len: usize) -> usize {
-    let builder = unsafe { &mut *builder };
-    let data = unsafe { std::slice::from_raw_parts(data as *const u8, len) };
-    builder.inner.body.put(data);
-    return len;
-}
-
-#[cfg(feature = "c")]
-#[no_mangle]
-pub extern "C" fn lh_response_builder_log_write(builder: *mut lh_response_builder_t, data: *const c_char, len: usize) -> usize {
-    let builder = unsafe { &mut *builder };
-    let data = unsafe { std::slice::from_raw_parts(data as *const u8, len) };
-    builder.inner.log.put(data);
-    builder.inner.log.put("\n".as_bytes());
-    return len;
-}
-
-#[cfg(feature = "c")]
-#[no_mangle]
-pub extern "C" fn lh_response_builder_exception(builder: *mut lh_response_builder_t, exception: *const c_char) {
-    let builder = unsafe { &mut *builder };
-    let exception_str = unsafe { CStr::from_ptr(exception).to_string_lossy().into_owned() };
-    builder.inner.exception(exception_str);
-}
-
-#[cfg(feature = "c")]
-#[no_mangle]
-pub extern "C" fn lh_response_builder_build(builder: *const lh_response_builder_t) -> *mut lh_response_t {
-    let builder = unsafe { &*builder };
-    Box::into_raw(Box::new(builder.inner.build().into()))
 }

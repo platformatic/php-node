@@ -1,13 +1,49 @@
 use std::collections::HashMap;
 
+/// A multi-map of HTTP headers.
+///
+/// # Examples
+///
+/// ```
+/// use lang_handler::Headers;
+///
+/// let mut headers = Headers::new();
+/// headers.set("Content-Type", "text/plain");
+/// assert_eq!(headers.get("Content-Type"), Some(&vec!["text/plain".to_string()]));
+/// ```
 #[derive(Debug, Clone)]
 pub struct Headers(HashMap<String, Vec<String>>);
 
 impl Headers {
+    /// Creates a new `Headers` instance.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use lang_handler::Headers;
+    ///
+    /// let headers = Headers::new();
+    /// ```
     pub fn new() -> Self {
         Headers(HashMap::new())
     }
 
+    /// Returns the values associated with a header field.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use lang_handler::Headers;
+    ///
+    /// let mut headers = Headers::new();
+    /// headers.set("Accept", "text/plain");
+    /// headers.set("Accept", "application/json");
+    ///
+    /// assert_eq!(headers.get("Accept"), Some(&vec![
+    ///   "text/plain".to_string(),
+    ///   "application/json".to_string()
+    /// ]));
+    /// ```
     pub fn get<K>(&self, key: K) -> Option<&Vec<String>>
     where
         K: AsRef<str>,
@@ -15,6 +51,17 @@ impl Headers {
         self.0.get(key.as_ref())
     }
 
+    /// Sets a header field with the given value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use lang_handler::Headers;
+    ///
+    /// let mut headers = Headers::new();
+    /// headers.set("Content-Type", "text/plain");
+    /// assert_eq!(headers.get("Content-Type"), Some(&vec!["text/plain".to_string()]));
+    /// ```
     pub fn set<K, V>(&mut self, key: K, value: V)
     where
         K: Into<String>,
@@ -26,6 +73,18 @@ impl Headers {
             .push(value.into());
     }
 
+    /// Removes a header field.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use lang_handler::Headers;
+    ///
+    /// let mut headers = Headers::new();
+    /// headers.set("Content-Type", "text/plain");
+    /// headers.remove("Content-Type");
+    /// assert_eq!(headers.get("Content-Type"), None);
+    /// ```
     pub fn remove<K>(&mut self, key: K)
     where
         K: AsRef<str>,
@@ -33,126 +92,41 @@ impl Headers {
         self.0.remove(key.as_ref());
     }
 
+    /// Returns an iterator over the headers.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use lang_handler::Headers;
+    ///
+    /// let mut headers = Headers::new();
+    /// headers.set("Accept", "text/plain");
+    /// headers.set("Accept", "application/json");
+    ///
+    /// for (key, values) in headers.iter() {
+    ///    println!("{}: {:?}", key, values);
+    /// }
+    /// ```
     pub fn iter(&self) -> impl Iterator<Item = (&String, &Vec<String>)> {
         self.0.iter()
     }
 
+    /// Returns an iterator over the header values.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use lang_handler::Headers;
+    ///
+    /// let mut headers = Headers::new();
+    /// headers.set("Accept", "text/plain");
+    /// headers.set("Accept", "application/json");
+    ///
+    /// for value in headers.iter_values() {
+    ///    println!("{:?}", value);
+    /// }
+    /// ```
     pub fn iter_values(&self) -> impl Iterator<Item = &String> {
         self.0.values().flatten()
     }
-}
-
-#[allow(non_camel_case_types)]
-pub struct lh_headers_t {
-    inner: Headers,
-}
-
-impl From<Headers> for lh_headers_t {
-    fn from(inner: Headers) -> Self {
-        Self { inner }
-    }
-}
-
-impl From<&lh_headers_t> for Headers {
-    fn from(headers: &lh_headers_t) -> Headers {
-        headers.inner.clone()
-    }
-}
-
-#[cfg(feature = "c")]
-#[no_mangle]
-pub extern "C" fn lh_headers_new() -> *mut lh_headers_t {
-    let headers = Headers::new();
-    Box::into_raw(Box::new(headers.into()))
-}
-
-#[cfg(feature = "c")]
-#[no_mangle]
-pub extern "C" fn lh_headers_free(headers: *mut lh_headers_t) {
-    if !headers.is_null() {
-        unsafe {
-            drop(Box::from_raw(headers));
-        }
-    }
-}
-
-#[cfg(feature = "c")]
-#[no_mangle]
-pub extern "C" fn lh_headers_count(headers: *const lh_headers_t, key: *const std::os::raw::c_char) -> usize {
-    let headers = unsafe {
-        assert!(!headers.is_null());
-        &*headers
-    };
-    let key = unsafe {
-        assert!(!key.is_null());
-        std::ffi::CStr::from_ptr(key).to_str().unwrap()
-    };
-    match headers.inner.get(key) {
-        Some(value) => value.len(),
-        None => 0
-    }
-}
-
-#[cfg(feature = "c")]
-#[no_mangle]
-pub extern "C" fn lh_headers_get(headers: *const lh_headers_t, key: *const std::os::raw::c_char) -> *const std::os::raw::c_char {
-    let headers = unsafe {
-        assert!(!headers.is_null());
-        &*headers
-    };
-    let key = unsafe {
-        assert!(!key.is_null());
-        std::ffi::CStr::from_ptr(key).to_str().unwrap()
-    };
-    match headers.inner.get(key) {
-        Some(values) => {
-            if values.len() > 0 {
-                values[values.len() - 1].as_ptr() as *const std::os::raw::c_char
-            } else {
-                std::ptr::null()
-            }
-        },
-        None => std::ptr::null()
-    }
-}
-
-#[cfg(feature = "c")]
-#[no_mangle]
-pub extern "C" fn lh_headers_get_nth(headers: *const lh_headers_t, key: *const std::os::raw::c_char, index: usize) -> *const std::os::raw::c_char {
-    let headers = unsafe {
-        assert!(!headers.is_null());
-        &*headers
-    };
-    let key = unsafe {
-        assert!(!key.is_null());
-        std::ffi::CStr::from_ptr(key).to_str().unwrap()
-    };
-    match headers.inner.get(key) {
-        Some(values) => {
-            if index < values.len() {
-                values[index].as_ptr() as *const std::os::raw::c_char
-            } else {
-                std::ptr::null()
-            }
-        },
-        None => std::ptr::null()
-    }
-}
-
-#[cfg(feature = "c")]
-#[no_mangle]
-pub extern "C" fn lh_headers_set(headers: *mut lh_headers_t, key: *const std::os::raw::c_char, value: *const std::os::raw::c_char) {
-    let headers = unsafe {
-        assert!(!headers.is_null());
-        &mut *headers
-    };
-    let key = unsafe {
-        assert!(!key.is_null());
-        std::ffi::CStr::from_ptr(key).to_str().unwrap().to_string()
-    };
-    let value = unsafe {
-        assert!(!value.is_null());
-        std::ffi::CStr::from_ptr(value).to_str().unwrap().to_string()
-    };
-    headers.inner.set(key, value);
 }
