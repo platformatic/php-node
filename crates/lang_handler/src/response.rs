@@ -6,7 +6,7 @@ use bytes::{Bytes, BytesMut, BufMut};
 use crate::Headers;
 use crate::headers::lh_headers_t;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Response {
     status: u16,
     headers: Headers,

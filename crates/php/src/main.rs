@@ -3,23 +3,11 @@ use php::{Embed, Request, Handler};
 pub fn main() {
     let code = "
         http_response_code(123);
-
-        // foreach ($_SERVER as $name => $value) {
-        //     header(\"$name: $value\");
-        // }
-
+        header('Content-Type: text/plain');
         echo file_get_contents(\"php://input\");
-
-        print('hello');
-        flush();
     ";
-    // let code = "
-    //     http_response_code(123);
-    //     echo $HTTP_RAW_POST_DATA;
-    // ";
     let filename = Some("test.php");
     let embed = Embed::new_with_args(code, filename, std::env::args());
-    // let embed = Embed::new(code, filename);
 
     let request = Request::builder()
         .method("POST")
@@ -29,19 +17,10 @@ pub fn main() {
         .body("Hello, World!")
         .build();
 
-    println!("=== request ===");
-    println!("method: {}", request.method());
-    println!("url: {:?}", request.url());
-    println!("headers: {:?}", request.headers());
-    println!("body: {:?}", request.body());
-    println!("");
+    println!("request: {:#?}", request);
 
     let response = embed.handle(request.clone())
         .expect("failed to handle request");
 
-    println!("\n=== response ===");
-    println!("status: {:?}", response.status());
-    println!("headers: {:?}", response.headers());
-    println!("body: {:?}", response.body());
-    println!("");
+    println!("response: {:#?}", response);
 }

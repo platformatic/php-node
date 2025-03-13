@@ -1,6 +1,8 @@
 #[cfg(feature = "c")]
 use std::{ffi, ffi::{CStr, CString}};
 
+use std::fmt::Debug;
+
 use bytes::{Buf, Bytes, BytesMut};
 use url::{ParseError, Url};
 
@@ -8,7 +10,7 @@ use crate::Headers;
 use crate::headers::lh_headers_t;
 use crate::url::lh_url_t;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Request {
     method: String,
     url: Url,
