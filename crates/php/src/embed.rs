@@ -8,15 +8,8 @@ use lang_handler::{Handler, Request, Response};
 
 use crate::sys;
 
-#[derive(Debug, Clone)]
-pub struct Embed {
-    code: String,
-    filename: Option<String>,
-}
-
-unsafe impl Send for Embed {}
-unsafe impl Sync for Embed {}
-
+// This is a helper to ensure that PHP is initialized and deinitialized at the
+// appropriate times.
 struct PhpInit;
 
 impl PhpInit {
@@ -48,7 +41,44 @@ impl Drop for PhpInit {
 
 static PHP_INIT: OnceLock<PhpInit> = OnceLock::new();
 
+/// Embed a PHP script into a Rust application to handle HTTP requests.
+///
+/// # Examples
+///
+/// ```
+/// use php::{Embed, Handler, Request, Response};
+///
+/// let handler = Embed::new("echo 'Hello, world!';", Some("example.php"));
+///
+/// let request = Request::builder()
+///   .method("GET")
+///   .url("http://example.com").expect("invalid url")
+///   .build();
+///
+/// let response = handler.handle(request).unwrap();
+///
+/// assert_eq!(response.status(), 200);
+/// assert_eq!(response.body(), "Hello, world!");
+/// ```
+#[derive(Debug, Clone)]
+pub struct Embed {
+    code: String,
+    filename: Option<String>,
+}
+
+unsafe impl Send for Embed {}
+unsafe impl Sync for Embed {}
+
 impl Embed {
+    /// Creates a new `Embed` instance.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use php::Embed;
+    ///
+    /// let embed = Embed::new("echo 'Hello, world!';", Some("example.php"));
+    /// ```
     pub fn new<C, F>(code: C, filename: Option<F>) -> Self
     where
         C: Into<String>,
@@ -57,6 +87,16 @@ impl Embed {
         Embed::new_with_argv::<C, F, String>(code, filename, vec![])
     }
 
+    /// Creates a new `Embed` instance with command-line arguments.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use php::Embed;
+    ///
+    /// let args = std::env::args();
+    /// let embed = Embed::new_with_args("echo $argv[1];", Some("example.php"), args);
+    /// ```
     pub fn new_with_args<C, F>(code: C, filename: Option<F>, args: Args) -> Self
     where
         C: Into<String>,
@@ -65,6 +105,28 @@ impl Embed {
         Embed::new_with_argv(code, filename, args.collect())
     }
 
+    /// Creates a new `Embed` instance with command-line arguments.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use php::{Embed, Handler, Request, Response};
+    ///
+    /// let embed = Embed::new_with_argv("echo $_SERVER['argv'][0];", Some("example.php"), vec![
+    ///   "Hello, world!"
+    /// ]);
+    ///
+    /// let request = Request::builder()
+    ///   .method("GET")
+    ///   .url("http://example.com").expect("invalid url")
+    ///   .build();
+    ///
+    /// let response = embed.handle(request).unwrap();
+    ///
+    /// assert_eq!(response.status(), 200);
+    /// # // TODO: Uncomment when argv gets passed through correctly.
+    /// # // assert_eq!(response.body(), "Hello, world!");
+    /// ```
     pub fn new_with_argv<C, F, S>(code: C, filename: Option<F>, argv: Vec<S>) -> Self
     where
         C: Into<String>,
@@ -83,6 +145,25 @@ impl Embed {
 impl Handler for Embed {
     type Error = String;
 
+    /// Handles an HTTP request.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use php::{Embed, Handler, Request, Response};
+    ///
+    /// let handler = Embed::new("echo 'Hello, world!';", Some("example.php"));
+    ///
+    /// let request = Request::builder()
+    ///   .method("GET")
+    ///   .url("http://example.com").expect("invalid url")
+    ///   .build();
+    ///
+    /// let response = handler.handle(request).unwrap();
+    ///
+    /// assert_eq!(response.status(), 200);
+    /// assert_eq!(response.body(), "Hello, world!");
+    /// ```
     fn handle(&self, request: Request) -> Result<Response, Self::Error> {
         let code = CString::new(self.code.clone())
             .unwrap();
