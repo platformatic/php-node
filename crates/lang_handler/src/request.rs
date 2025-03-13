@@ -1,15 +1,35 @@
-#[cfg(feature = "c")]
-use std::{ffi, ffi::{CStr, CString}};
-
 use std::fmt::Debug;
 
-use bytes::{Buf, Bytes, BytesMut};
+use bytes::{Bytes, BytesMut};
 use url::{ParseError, Url};
 
 use crate::Headers;
-use crate::headers::lh_headers_t;
-use crate::url::lh_url_t;
 
+/// Represents an HTTP request. Includes the method, URL, headers, and body.
+///
+/// # Examples
+///
+/// ```
+/// use lang_handler::{Request, Headers};
+///
+/// let request = Request::builder()
+///   .method("POST")
+///   .url("http://example.com/test.php").expect("invalid url")
+///   .header("Accept", "text/html")
+///   .header("Accept", "application/json")
+///   .header("Host", "example.com")
+///   .body("Hello, World!")
+///   .build();
+///
+/// assert_eq!(request.method(), "POST");
+/// assert_eq!(request.url().as_str(), "http://example.com/test.php");
+/// assert_eq!(request.headers().get("Accept"), Some(&vec![
+///   "text/html".to_string(),
+///   "application/json".to_string()
+/// ]));
+/// assert_eq!(request.headers().get("Host"), Some(&vec!["example.com".to_string()]));
+/// assert_eq!(request.body(), "Hello, World!");
+/// ```
 #[derive(Clone, Debug)]
 pub struct Request {
     method: String,
@@ -20,6 +40,22 @@ pub struct Request {
 }
 
 impl Request {
+    /// Creates a new `Request` with the given method, URL, headers, and body.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use lang_handler::{Request, Headers};
+    ///
+    /// let mut headers = Headers::new();
+    /// headers.set("Accept", "text/html");
+    ///
+    /// let request = Request::new(
+    ///   "POST".to_string(),
+    ///   "http://example.com/test.php".parse().unwrap(),
+    ///   headers,
+    ///   "Hello, World!"
+    /// );
     pub fn new<T: Into<Bytes>>(method: String, url: Url, headers: Headers, body: T) -> Self {
         Self {
             method,
@@ -29,31 +65,165 @@ impl Request {
         }
     }
 
+    /// Creates a new `RequestBuilder` to build a `Request`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use lang_handler::{Request, RequestBuilder};
+    ///
+    /// let request = Request::builder()
+    ///   .method("POST")
+    ///   .url("http://example.com/test.php").expect("invalid url")
+    ///   .header("Content-Type", "text/html")
+    ///   .header("Content-Length", 13.to_string())
+    ///   .body("Hello, World!")
+    ///   .build();
+    ///
+    /// assert_eq!(request.method(), "POST");
+    /// assert_eq!(request.url().as_str(), "http://example.com/test.php");
+    /// assert_eq!(request.headers().get("Content-Type"), Some(&vec!["text/html".to_string()]));
+    /// assert_eq!(request.headers().get("Content-Length"), Some(&vec!["13".to_string()]));
+    /// assert_eq!(request.body(), "Hello, World!");
+    /// ```
     pub fn builder() -> RequestBuilder {
         RequestBuilder::new()
     }
 
+    /// Creates a new `RequestBuilder` to extend a `Request`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use lang_handler::{Request, RequestBuilder};
+    ///
+    /// let request = Request::builder()
+    ///   .method("GET")
+    ///   .url("http://example.com/test.php").expect("invalid url")
+    ///   .header("Content-Type", "text/plain")
+    ///   .build();
+    ///
+    /// let extended = request.extend()
+    ///   .method("POST")
+    ///   .header("Content-Length", 12.to_string())
+    ///   .body("Hello, World")
+    ///   .build();
+    ///
+    /// assert_eq!(extended.method(), "POST");
+    /// assert_eq!(extended.url().as_str(), "http://example.com/test.php");
+    /// assert_eq!(extended.headers().get("Content-Type"), Some(&vec!["text/plain".to_string()]));
+    /// assert_eq!(extended.headers().get("Content-Length"), Some(&vec!["12".to_string()]));
+    /// assert_eq!(extended.body(), "Hello, World");
+    /// ```
     pub fn extend(&self) -> RequestBuilder {
         RequestBuilder::extend(self)
     }
 
+    /// Returns the method of the request.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use lang_handler::{Request, Headers};
+    ///
+    /// let request = Request::new(
+    ///   "POST".to_string(),
+    ///   "http://example.com/test.php".parse().unwrap(),
+    ///   Headers::new(),
+    ///   "Hello, World!"
+    /// );
+    ///
+    /// assert_eq!(request.method(), "POST");
+    /// ```
     pub fn method(&self) -> &str {
         &self.method
     }
 
+    /// Returns the URL of the request.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use lang_handler::{Request, Headers};
+    ///
+    /// let request = Request::new(
+    ///   "POST".to_string(),
+    ///   "http://example.com/test.php".parse().unwrap(),
+    ///   Headers::new(),
+    ///   "Hello, World!"
+    /// );
+    ///
+    /// assert_eq!(request.url().as_str(), "http://example.com/test.php");
+    /// ```
     pub fn url(&self) -> &Url {
         &self.url
     }
 
+    /// Returns the headers of the request.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use lang_handler::{Request, Headers};
+    ///
+    /// let mut headers = Headers::new();
+    /// headers.set("Accept", "text/html");
+    ///
+    /// let request = Request::new(
+    ///   "POST".to_string(),
+    ///   "http://example.com/test.php".parse().unwrap(),
+    ///   headers,
+    ///   "Hello, World!"
+    /// );
+    ///
+    /// assert_eq!(request.headers().get("Accept"), Some(&vec!["text/html".to_string()]));
+    /// ```
     pub fn headers(&self) -> &Headers {
         &self.headers
     }
 
+    /// Returns the body of the request.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use lang_handler::{Request, Headers};
+    ///
+    /// let request = Request::new(
+    ///   "POST".to_string(),
+    ///   "http://example.com/test.php".parse().unwrap(),
+    ///   Headers::new(),
+    ///   "Hello, World!"
+    /// );
+    ///
+    /// assert_eq!(request.body(), "Hello, World!");
+    /// ```
     pub fn body(&self) -> Bytes {
         self.body.clone()
     }
 }
 
+/// Builds an HTTP request.
+///
+/// # Examples
+///
+/// ```
+/// use lang_handler::{Request, RequestBuilder};
+///
+/// let request = Request::builder()
+///   .method("POST")
+///   .url("http://example.com/test.php").expect("invalid url")
+///   .header("Content-Type", "text/html")
+///   .header("Content-Length", 13.to_string())
+///   .body("Hello, World!")
+///   .build();
+///
+/// assert_eq!(request.method(), "POST");
+/// assert_eq!(request.url().as_str(), "http://example.com/test.php");
+/// assert_eq!(request.headers().get("Content-Type"), Some(&vec!["text/html".to_string()]));
+/// assert_eq!(request.headers().get("Content-Length"), Some(&vec!["13".to_string()]));
+/// assert_eq!(request.body(), "Hello, World!");
+/// ```
 #[derive(Clone)]
 pub struct RequestBuilder {
     method: Option<String>,
@@ -63,6 +233,15 @@ pub struct RequestBuilder {
 }
 
 impl RequestBuilder {
+    /// Creates a new `RequestBuilder`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use lang_handler::RequestBuilder;
+    ///
+    /// let builder = RequestBuilder::new();
+    /// ```
     pub fn new() -> Self {
         Self {
             method: None,
@@ -72,6 +251,31 @@ impl RequestBuilder {
         }
     }
 
+    /// Creates a new `RequestBuilder` to extend an existing `Request`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use lang_handler::{Headers, Request, RequestBuilder};
+    ///
+    /// let mut headers = Headers::new();
+    /// headers.set("Accept", "text/html");
+    ///
+    /// let request = Request::new(
+    ///   "GET".to_string(),
+    ///   "http://example.com".parse().unwrap(),
+    ///   headers,
+    ///   "Hello, World!"
+    /// );
+    ///
+    /// let extended = RequestBuilder::extend(&request)
+    ///   .build();
+    ///
+    /// assert_eq!(extended.method(), "GET");
+    /// assert_eq!(extended.url().as_str(), "http://example.com/");
+    /// assert_eq!(extended.headers().get("Accept"), Some(&vec!["text/html".to_string()]));
+    /// assert_eq!(extended.body(), "Hello, World!");
+    /// ```
     pub fn extend(request: &Request) -> Self {
         Self {
             method: Some(request.method().into()),
@@ -81,11 +285,37 @@ impl RequestBuilder {
         }
     }
 
+    /// Sets the method of the request.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use lang_handler::RequestBuilder;
+    ///
+    /// let request = RequestBuilder::new()
+    ///  .method("POST")
+    ///  .build();
+    ///
+    /// assert_eq!(request.method(), "POST");
+    /// ```
     pub fn method<T: Into<String>>(mut self, method: T) -> Self {
         self.method = Some(method.into());
         self
     }
 
+    /// Sets the URL of the request.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use lang_handler::RequestBuilder;
+    ///
+    /// let request = RequestBuilder::new()
+    ///   .url("http://example.com/test.php").expect("invalid url")
+    ///   .build();
+    ///
+    /// assert_eq!(request.url().as_str(), "http://example.com/test.php");
+    /// ```
     pub fn url<T>(mut self, url: T) -> Result<Self, ParseError>
     where
         T: Into<String>
@@ -99,6 +329,19 @@ impl RequestBuilder {
         }
     }
 
+    /// Sets a header of the request.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use lang_handler::RequestBuilder;
+    ///
+    /// let request = RequestBuilder::new()
+    ///   .header("Accept", "text/html")
+    ///   .build();
+    ///
+    /// assert_eq!(request.headers().get("Accept"), Some(&vec!["text/html".to_string()]));
+    /// ```
     pub fn header<K, V>(mut self, key: K, value: V) -> Self
     where
         K: Into<String>,
@@ -108,201 +351,45 @@ impl RequestBuilder {
         self
     }
 
+    /// Sets the body of the request.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use lang_handler::RequestBuilder;
+    ///
+    /// let request = RequestBuilder::new()
+    ///   .body("Hello, World!")
+    ///   .build();
+    ///
+    /// assert_eq!(request.body(), "Hello, World!");
+    /// ```
     pub fn body<T: Into<BytesMut>>(mut self, body: T) -> Self {
         self.body = body.into();
         self
     }
 
+    /// Builds the request.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use lang_handler::RequestBuilder;
+    ///
+    /// let request = RequestBuilder::new()
+    ///   .build();
+    ///
+    /// assert_eq!(request.method(), "GET");
+    /// assert_eq!(request.url().as_str(), "http://example.com/");
+    /// assert_eq!(request.body(), "");
+    /// ```
     pub fn build(self) -> Request {
         Request {
             method: self.method.unwrap_or_else(|| "GET".to_string()),
-            url: self.url.unwrap_or_else(|| Url::parse("/").unwrap()),
+            // TODO: This is wrong. Return a Result instead.
+            url: self.url.unwrap_or_else(|| Url::parse("http://example.com").unwrap()),
             headers: self.headers,
             body: self.body.freeze(),
-        }
-    }
-}
-
-#[allow(non_camel_case_types)]
-pub struct lh_request_t {
-    inner: Request,
-}
-
-impl From<Request> for lh_request_t {
-    fn from(inner: Request) -> Self {
-        Self { inner }
-    }
-}
-
-impl From<&lh_request_t> for Request {
-    fn from(request: &lh_request_t) -> Request {
-        request.inner.clone()
-    }
-}
-
-#[cfg(feature = "c")]
-#[no_mangle]
-pub extern "C" fn lh_request_new(
-    method: *const ffi::c_char,
-    url: *const ffi::c_char,
-    headers: *mut lh_headers_t,
-    body: *const ffi::c_char,
-) -> *mut lh_request_t {
-    let method = unsafe { CStr::from_ptr(method).to_string_lossy().into_owned() };
-    let url_str = unsafe { CStr::from_ptr(url).to_string_lossy().into_owned() };
-    let url = Url::parse(&url_str).unwrap();
-    let body = if body.is_null() {
-        None
-    } else {
-        Some(unsafe { CStr::from_ptr(body).to_bytes() })
-    };
-    let headers = unsafe { &*headers };
-    let request = Request::new(method, url, headers.into(), body.unwrap_or(&[]));
-    Box::into_raw(Box::new(request.into()))
-}
-
-#[cfg(feature = "c")]
-#[no_mangle]
-pub extern "C" fn lh_request_method(request: *const lh_request_t) -> *const ffi::c_char {
-    let request = unsafe { &*request };
-    CString::new(request.inner.method()).unwrap().into_raw()
-}
-
-#[cfg(feature = "c")]
-#[no_mangle]
-pub extern "C" fn lh_request_url(request: *const lh_request_t) -> *mut lh_url_t {
-    let request = unsafe { &*request };
-    Box::into_raw(Box::new(request.inner.url().clone().into()))
-}
-
-#[cfg(feature = "c")]
-#[no_mangle]
-pub extern "C" fn lh_request_headers(request: *const lh_request_t) -> *mut lh_headers_t {
-    let request = unsafe { &*request };
-    Box::into_raw(Box::new(request.inner.headers().clone().into()))
-}
-
-#[cfg(feature = "c")]
-#[no_mangle]
-pub extern "C" fn lh_request_body(request: *const lh_request_t) -> *const ffi::c_char {
-    let request = unsafe { &*request };
-    CString::new(request.inner.body()).unwrap().into_raw()
-}
-
-#[cfg(feature = "c")]
-#[no_mangle]
-pub extern "C" fn lh_request_body_read(request: *const lh_request_t, buffer: *mut ffi::c_char, length: usize) -> usize {
-    let request = unsafe { &*request };
-    let body = request.inner.body();
-
-    let length = length.min(body.len());
-    let chunk = body.take(length);
-
-    unsafe {
-        std::ptr::copy_nonoverlapping(chunk.chunk().as_ptr() as *mut ffi::c_char, buffer, length);
-    }
-    length
-}
-
-#[cfg(feature = "c")]
-#[no_mangle]
-pub extern "C" fn lh_request_free(request: *mut lh_request_t) {
-    if !request.is_null() {
-        unsafe {
-            drop(Box::from_raw(request));
-        }
-    }
-}
-
-#[allow(non_camel_case_types)]
-pub struct lh_request_builder_t {
-    inner: RequestBuilder,
-}
-
-impl From<RequestBuilder> for lh_request_builder_t {
-    fn from(inner: RequestBuilder) -> Self {
-        Self { inner }
-    }
-}
-
-impl From<&lh_request_builder_t> for RequestBuilder {
-    fn from(builder: &lh_request_builder_t) -> RequestBuilder {
-        builder.inner.clone()
-    }
-}
-
-#[cfg(feature = "c")]
-#[no_mangle]
-pub extern "C" fn lh_request_builder_new() -> *mut lh_request_builder_t {
-    Box::into_raw(Box::new(RequestBuilder::new().into()))
-}
-
-#[cfg(feature = "c")]
-#[no_mangle]
-pub extern "C" fn lh_request_builder_extend(request: *const lh_request_t) -> *mut lh_request_builder_t {
-    let request = unsafe { &*request };
-    Box::into_raw(Box::new(RequestBuilder::extend(&request.inner).into()))
-}
-
-#[cfg(feature = "c")]
-#[no_mangle]
-pub extern "C" fn lh_request_builder_method(
-    builder: *mut lh_request_builder_t,
-    method: *const ffi::c_char,
-) -> *mut lh_request_builder_t {
-    let method = unsafe { CStr::from_ptr(method).to_string_lossy().into_owned() };
-    let builder = unsafe { &mut *builder };
-    Box::into_raw(Box::new(builder.inner.clone().method(method).into()))
-}
-
-#[cfg(feature = "c")]
-#[no_mangle]
-pub extern "C" fn lh_request_builder_url(
-    builder: *mut lh_request_builder_t,
-    url: *const ffi::c_char,
-) -> *mut lh_request_builder_t {
-    let url = unsafe { CStr::from_ptr(url).to_string_lossy().into_owned() };
-    let builder = unsafe { &mut *builder };
-    Box::into_raw(Box::new(builder.inner.clone().url(&url).unwrap().into()))
-}
-
-#[cfg(feature = "c")]
-#[no_mangle]
-pub extern "C" fn lh_request_builder_header(
-    builder: *mut lh_request_builder_t,
-    key: *const ffi::c_char,
-    value: *const ffi::c_char,
-) -> *mut lh_request_builder_t {
-    let key = unsafe { CStr::from_ptr(key).to_string_lossy().into_owned() };
-    let value = unsafe { CStr::from_ptr(value).to_string_lossy().into_owned() };
-    let builder = unsafe { &mut *builder };
-    Box::into_raw(Box::new(builder.inner.clone().header(key, value).into()))
-}
-
-#[cfg(feature = "c")]
-#[no_mangle]
-pub extern "C" fn lh_request_builder_body(
-    builder: *mut lh_request_builder_t,
-    body: *const ffi::c_char,
-) -> *mut lh_request_builder_t {
-    let body = unsafe { CStr::from_ptr(body).to_bytes() };
-    let builder = unsafe { &mut *builder };
-    Box::into_raw(Box::new(builder.inner.clone().body(body).into()))
-}
-
-#[cfg(feature = "c")]
-#[no_mangle]
-pub extern "C" fn lh_request_builder_build(builder: *mut lh_request_builder_t) -> *mut lh_request_t {
-    let builder = unsafe { Box::from_raw(builder) };
-    Box::into_raw(Box::new(builder.inner.build().into()))
-}
-
-#[cfg(feature = "c")]
-#[no_mangle]
-pub extern "C" fn lh_request_builder_free(builder: *mut lh_request_builder_t) {
-    if !builder.is_null() {
-        unsafe {
-            drop(Box::from_raw(builder));
         }
     }
 }
