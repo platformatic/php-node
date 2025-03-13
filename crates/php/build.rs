@@ -10,6 +10,7 @@ use std::{
 // use autotools::Config;
 use bindgen::Builder;
 use downloader::{Download, Downloader};
+#[cfg(not(target_os = "windows"))]
 use file_mode::ModePath;
 
 fn maybe_windowsify<T>(path: T) -> String where T: Display {
@@ -20,8 +21,26 @@ fn maybe_windowsify<T>(path: T) -> String where T: Display {
 }
 
 fn spc_url() -> String {
-    let os = env::var("CARGO_CFG_TARGET_OS").unwrap();
-    let arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap();
+    let os = if cfg!(target_os = "macos") {
+        "macos"
+    } else if cfg!(target_os = "linux") {
+        "linux"
+    } else if cfg!(target_os = "windows") {
+        "windows"
+    } else {
+        panic!("Unsupported OS");
+    };
+
+    let arch = if cfg!(target_arch = "x86") {
+        "x86"
+    } else if cfg!(target_arch = "x86_64") {
+        "x86_64"
+    } else if cfg!(target_arch = "aarch64") {
+        "aarch64"
+    } else {
+        panic!("Unsupported arch");
+    };
+
     let url = format!("https://dl.static-php.dev/static-php-cli/spc-bin/nightly/spc-{}-{}", os, arch);
 
     maybe_windowsify(url)
@@ -51,6 +70,7 @@ fn get_spc() -> PathBuf {
     downloader.download(&vec![dl]).unwrap();
 
     // Make the file executable
+    #[cfg(not(target_os = "windows"))]
     spc.set_mode("a+x").unwrap();
     spc
 }
@@ -172,6 +192,8 @@ fn main() {
     let spc = get_spc();
     let spc_cmd = spc.to_str().unwrap();
 
+    execute_command(&[spc_cmd, "doctor", "--auto-fix"], None);
+
     let has_downloads = current_dir.join("downloads").exists();
     let should_download = env::var("PHP_SHOULD_DOWNLOAD")
         .map_or(!has_downloads, |s| s == "true");
@@ -256,7 +278,9 @@ fn main() {
 
     let crate_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
 
-    let lang_handler_include = crate_dir.join("../../target/release");
+    let profile = env::var("PROFILE").unwrap();
+    let lang_handler_include = crate_dir
+        .join(format!("../../target/{}", profile));
 
     println!("cargo:rustc-link-search={}", lang_handler_include.display());
     println!("cargo:rustc-link-lib=lang_handler");
