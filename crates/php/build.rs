@@ -1,236 +1,29 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     env,
     ffi::OsStr,
-    fmt::{Debug, Display},
+    fmt::Debug,
     path::PathBuf,
     process::Command
 };
 
 // use autotools::Config;
 use bindgen::Builder;
-use downloader::{Download, Downloader};
-#[cfg(not(target_os = "windows"))]
-use file_mode::ModePath;
-
-fn maybe_windowsify<T>(path: T) -> String where T: Display {
-    match env::var("CARGO_CFG_TARGET_OS").as_deref() {
-        Ok("windows") => format!("{}.exe", path),
-        _ => path.to_string()
-    }
-}
-
-fn spc_url() -> String {
-    let os = if cfg!(target_os = "macos") {
-        "macos"
-    } else if cfg!(target_os = "linux") {
-        "linux"
-    } else if cfg!(target_os = "windows") {
-        "windows"
-    } else {
-        panic!("Unsupported OS");
-    };
-
-    let arch = if cfg!(target_arch = "x86") {
-        "x86"
-    } else if cfg!(target_arch = "x86_64") {
-        "x86_64"
-    } else if cfg!(target_arch = "aarch64") {
-        "aarch64"
-    } else {
-        panic!("Unsupported arch");
-    };
-
-    let url = format!("https://dl.static-php.dev/static-php-cli/spc-bin/nightly/spc-{}-{}", os, arch);
-
-    maybe_windowsify(url)
-}
-
-fn get_spc() -> PathBuf {
-    let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
-
-    let filename = maybe_windowsify("spc");
-    let spc = out_path.join(filename.clone());
-
-    println!("cargo:rerun-if-changed={}", spc.to_str().unwrap());
-
-    if spc.exists() {
-        return spc;
-    }
-    println!("spc is not present");
-
-    let mut downloader = Downloader::builder()
-        .download_folder(&out_path)
-        .build()
-        .unwrap();
-
-    let dl = Download::new(&spc_url())
-        .file_name(filename.as_ref());
-
-    downloader.download(&vec![dl]).unwrap();
-
-    // Make the file executable
-    #[cfg(not(target_os = "windows"))]
-    spc.set_mode("a+x").unwrap();
-    spc
-}
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
 
-    let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
-    let current_dir = env::current_dir().unwrap();
+    let crate_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+    let project_root = crate_dir.join("../..");
 
-    // Any commented out ones I was not able to get to build for some reason...
-    let available_extensions = HashSet::from([
-        "amqp",
-        "apcu",
-        "ast",
-        "bcmath",
-        "bz2",
-        "calendar",
-        "ctype",
-        // "curl",
-        // "dba",
-        // "dio",
-        // "dom",
-        // "ds",
-        // "event",
-        // "exif",
-        // "ffi",
-        // "fileinfo",
-        // "filter",
-        // "ftp",
-        // "gd",
-        // "gettext",
-        // "glfw",
-        // "gmp",
-        // "gmssl",
-        // "grpc",
-        // "iconv",
-        // "igbinary",
-        // "imagick",
-        // "imap",
-        // "inotify",
-        // "intl",
-        // "ldap",
-        // "libxml",
-        // "mbregex",
-        // "mbstring",
-        // "mcrypt",
-        // "memcache",
-        // "memcached",
-        // "mongodb",
-        // "msgpack",
-        // "mysqli",
-        // "mysqlnd",
-        // "oci8",
-        // "opcache",
-        // "openssl",
-        // "parallel", // Requires zts
-        // "password-argon2",
-        // "pcntl",
-        // "pdo",
-        // "pdo_mysql",
-        // "pdo_pgsql",
-        // "pdo_sqlite",
-        // "pdo_sqlsrv",
-        // "pgsql",
-        // "phar",
-        // "posix",
-        // "protobuf",
-        // "rar",
-        // "rdkafka",
-        // "readline",
-        // "redis",
-        // "session",
-        // "shmop",
-        // "simdjson",
-        // "simplexml",
-        // "snappy",
-        // "soap",
-        // "sockets",
-        // "sodium",
-        // "spx",
-        // "sqlite3",
-        // "sqlsrv",
-        // "ssh2",
-        // "swoole", // Mutually exclusive with pdo_*
-        // "swoole-hook-mysql", // Mutually exclusive with pdo_*
-        // "swoole-hook-pgsql", // Mutually exclusive with pdo_*
-        // "swoole-hook-sqlite", // Mutually exclusive with pdo_*
-        // "swow",
-        // "sysvmsg",
-        // "sysvsem",
-        // "sysvshm",
-        // "tidy",
-        // "tokenizer",
-        // "uuid",
-        // "uv",
-        // "xdebug",
-        // "xhprof",
-        // "xlswriter",
-        // "xml",
-        // "xmlreader",
-        // "xmlwriter",
-        // "xsl",
-        // "yac",
-        // "yaml",
-        // "zip",
-        // "zlib",
-        // "zstd"
-    ]);
-
-    // TODO: Make an actually reasonable selection of default extensions
-    let extensions = env::var("PHP_EXTENSIONS").unwrap_or_else(
-        |_| available_extensions.iter()
-            .map(|s| s.to_string())
-            .collect::<Vec<String>>()
-            .join(",")
-    );
-
-    let spc = get_spc();
+    let spc = project_root.join("spc");
     let spc_cmd = spc.to_str().unwrap();
 
-    execute_command(&[spc_cmd, "doctor", "--auto-fix"], None);
+    let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
 
-    let has_downloads = current_dir.join("downloads").exists();
-    let should_download = env::var("PHP_SHOULD_DOWNLOAD")
-        .map_or(!has_downloads, |s| s == "true");
-
-    if should_download {
-        // Download PHP and requested extensions
-        execute_command(&[
-            spc_cmd,
-            "download",
-            &format!("--for-extensions={}", extensions.clone()),
-            "--retry=10",
-            "--prefer-pre-built",
-            "--with-php=8.4"
-        ], None);
-    }
-
-    // TODO: Build if downloads modification time is more recent than libphp.a
-    let has_libphp = current_dir.join("buildroot/lib/libphp.a").exists();
-    let should_build = env::var("PHP_SHOULD_BUILD")
-        .map_or(should_download || !has_libphp, |s| s == "true");
-
-    if should_build {
-        let mut env = HashMap::new();
-        env.insert(
-            "SPC_CMD_PREFIX_PHP_CONFIGURE".to_string(),
-            "./configure --prefix= --with-valgrind=no --enable-shared=no --enable-static=yes --disable-all --disable-cgi --disable-phpdbg --enable-debug".to_string()
-        );
-        // Build in embed mode
-        execute_command(&[
-            spc_cmd,
-            "build",
-            &extensions,
-            "--build-embed",
-            "--enable-zts",
-            "--no-strip", // Keep debug symbols?
-        ], Some(env));
-    }
+    let extensions_sh = project_root.join("scripts/extensions.sh");
+    let extensions_cmd = extensions_sh.to_str().unwrap();
+    let extensions = execute_command(&[extensions_cmd], None);
 
     // Get the includes
     let includes = execute_command(&[
@@ -255,7 +48,7 @@ fn main() {
     }
 
     // Include SAPI headers
-    let sapi_include = current_dir
+    let sapi_include = project_root
         .join("buildroot/include/php/sapi")
         .canonicalize()
         .unwrap();
@@ -264,7 +57,12 @@ fn main() {
 
     // Link libraries
     let libs = libs.split(' ').collect::<Vec<_>>();
+    let mut is_framework = false;
     for dir in libs.iter() {
+        if is_framework {
+            is_framework = false;
+            println!("cargo:rustc-link-lib=framework={}", dir);
+        }
         if dir.starts_with("-L") {
             println!("cargo:rustc-link-search={}", &dir[2..]);
         }
@@ -272,21 +70,21 @@ fn main() {
             println!("cargo:rustc-link-lib={}", &dir[2..]);
         }
         if dir.starts_with("-framework") {
-            println!("cargo:rustc-link-lib=framework={}", &dir[11..]);
+            is_framework = true;
         }
     }
 
-    let crate_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+    // Locate lang_handler header and lib
+    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap())
+        .join("../../..")
+        .canonicalize()
+        .unwrap();
 
-    let profile = env::var("PROFILE").unwrap();
-    let lang_handler_include = crate_dir
-        .join(format!("../../target/{}", profile));
-
-    println!("cargo:rustc-link-search={}", lang_handler_include.display());
+    println!("cargo:rustc-link-search={}", out_dir.display());
     println!("cargo:rustc-link-lib=lang_handler");
-    println!("cargo:include={}", lang_handler_include.display());
+    println!("cargo:include={}", out_dir.display());
 
-    let lang_handler_include_flag = format!("-I{}", lang_handler_include.display());
+    let lang_handler_include_flag = format!("-I{}", out_dir.display());
     includes.push(lang_handler_include_flag.as_str());
 
     let mut builder = cc::Build::new();
@@ -298,6 +96,13 @@ fn main() {
         .compile("phpwrapper");
 
     println!("cargo:rerun-if-changed=src/php_wrapper.h");
+
+    let sw_vers = execute_command(&[
+        "sw_vers",
+        "-productVersion"
+    ], None);
+
+    println!("cargo:env=MACOSX_DEPLOYMENT_TARGET={}", sw_vers);
 
     let mut builder = Builder::default()
         // .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
@@ -340,13 +145,18 @@ fn execute_command<S: AsRef<OsStr> + Debug>(argv: &[S], env: Option<HashMap<Stri
     }
     command.args(&argv[1..]);
 
+    let crate_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+    let project_root = crate_dir.join("../..");
+    command.current_dir(project_root);
+
     let result = command
         .output()
         .unwrap_or_else(|e| panic!("Execute command {:?} failed with: {:?}", &argv, e));
 
     if !result.status.success() {
+        let out = String::from_utf8(result.stdout).unwrap();
         let err = String::from_utf8(result.stderr).unwrap();
-        panic!("Execute command {:?} failed with output: {}", &argv, err);
+        panic!("Execute command {:?} failed with stdout: {}, stderr: {}", &argv, out, err);
     }
 
     String::from_utf8(result.stdout).unwrap().trim().to_owned()

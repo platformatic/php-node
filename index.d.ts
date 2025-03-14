@@ -49,6 +49,15 @@ export type PhpHeaders = Headers
  * ```
  */
 export declare class Headers {
+  /**
+   * Create a new PHP headers instance.
+   *
+   * # Examples
+   *
+   * ```js
+   * const headers = new Headers();
+   * ```
+   */
   constructor()
   /**
    * Get the values for a given header key.
@@ -191,6 +200,26 @@ export declare class Php {
    * ```
    */
   handleRequest(request: PhpRequest): Promise<unknown>
+  /**
+   * Handle a PHP request synchronously.
+   *
+   * # Examples
+   *
+   * ```js
+   * const php = new Php({
+   *   code: 'echo "Hello, world!";'
+   * });
+   *
+   * const response = php.handleRequestSync(new Request({
+   *   method: 'GET',
+   *   url: 'http://example.com'
+   * }));
+   *
+   * console.log(response.status);
+   * console.log(response.body);
+   * ```
+   */
+  handleRequestSync(request: PhpRequest): PhpResponse
 }
 export type PhpRequest = Request
 /**

@@ -5,11 +5,13 @@ use std::path::PathBuf;
 
 fn main() {
     let crate_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
-    let profile = env::var("PROFILE").unwrap();
 
-    let target_str = format!("../../target/{}", profile);
-    let header_path = PathBuf::from(crate_dir.clone())
-        .join(target_str)
+    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap())
+        .join("../../..")
+        .canonicalize()
+        .unwrap();
+
+    let header_path = out_dir
         .join("lang_handler.h");
 
     cbindgen::Builder::new()
