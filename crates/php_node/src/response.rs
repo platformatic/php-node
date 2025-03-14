@@ -28,6 +28,7 @@ pub struct PhpResponse {
 }
 
 impl PhpResponse {
+    // Create a new PHP response instance.
     pub fn new(response: Response) -> Self {
         PhpResponse {
             response

@@ -27,14 +27,22 @@ jobs:
         settings:
           - host: macos-13
             target: x86_64-apple-darwin
+            os: macos
+            arch: x86_64
             build: yarn build --target x86_64-apple-darwin
-            # build: yarn build
-          - host: macos-latest
+            setup: |
+              brew install autoconf automake libtool
+          - host: macos-15
             target: aarch64-apple-darwin
+            os: macos
+            arch: aarch64
             build: yarn build --target aarch64-apple-darwin
-            # build: yarn build
+            setup: |
+              brew install autoconf automake libtool
           - host: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+            os: linux
+            arch: x86_64
             # docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian
             build: yarn build --target x86_64-unknown-linux-gnu
             # build: yarn build
@@ -54,6 +62,16 @@ jobs:
           #     sudo apt-get update
           #     sudo apt-get install gcc-arm-linux-gnueabihf libssl-dev -y
           #   build: yarn build --target armv7-unknown-linux-gnueabihf
+          - host: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-alpine
+            build: |-
+              set -e &&
+              rustup target add x86_64-unknown-linux-musl &&
+              yarn build --target x86_64-unknown-linux-musl
+            setup: |
+              sudo apt-get update
+              sudo apt-get install libssl-dev -y
           # - host: ubuntu-latest
           #   target: armv7-unknown-linux-musleabihf
           #   build: yarn build --target armv7-unknown-linux-musleabihf
@@ -81,7 +99,7 @@ jobs:
           #   build: |
           #     yarn build --target i686-pc-windows-msvc
           #     yarn test
-    name: stable - ${{ matrix.settings.target }} - node@20
+    name: stable - ${{ matrix.settings.target }} - node@22
     runs-on: ${{ matrix.settings.host }}
     steps:
       - uses: actions/checkout@v4
@@ -89,7 +107,7 @@ jobs:
         uses: actions/setup-node@v4
         if: ${{ !matrix.settings.docker }}
         with:
-          node-version: 20
+          node-version: 22
           cache: yarn
       - name: Install
         uses: dtolnay/rust-toolchain@stable
@@ -115,19 +133,35 @@ jobs:
         run: ${{ matrix.settings.setup }}
         if: ${{ matrix.settings.setup }}
         shell: bash
-      - name: Setup node x86
-        if: matrix.settings.target == 'i686-pc-windows-msvc'
-        run: yarn config set supportedArchitectures.cpu "ia32"
+      - name: Fetch SPC
         shell: bash
+        run: ./scripts/fetch-spc.sh
+      - name: Cache PHP Download
+        id: cache-php-download
+        uses: actions/cache@v4
+        with:
+          path: downloads
+          key: php-download-${{ matrix.settings.target }}-${{ matrix.settings.host }}
+      - name: Fetch PHP and extensions
+        if: steps.cache-php-download.outputs.cache-hit != 'true'
+        shell: bash
+        run: ./scripts/download-php.sh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Cache PHP
+        id: cache-php-build
+        uses: actions/cache@v4
+        with:
+          path: |
+            buildroot
+            source
+          key: php-build-${{ matrix.settings.target }}-${{ matrix.settings.host }}
+      - name: Build PHP
+        if: steps.cache-php-build.outputs.cache-hit != 'true'
+        shell: bash
+        run: ./scripts/build-php.sh
       - name: Install dependencies
         run: yarn install
-      - name: Setup node x86
-        uses: actions/setup-node@v4
-        if: matrix.settings.target == 'i686-pc-windows-msvc'
-        with:
-          node-version: 20
-          cache: yarn
-          architecture: x86
       - name: Build in docker
         uses: addnab/docker-run-action@v3
         if: ${{ matrix.settings.docker }}
