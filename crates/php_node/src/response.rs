@@ -10,7 +10,7 @@ use crate::PhpHeaders;
 #[napi(object)]
 pub struct PhpResponseOptions {
     /// The HTTP status code for the response.
-    pub status: u32,
+    pub status: i32,
     /// The headers for the response.
     pub headers: Option<HashMap<String, Vec<String>>>,
     /// The body for the response.
@@ -54,7 +54,7 @@ impl PhpResponse {
     #[napi(constructor)]
     pub fn constructor(options: PhpResponseOptions) -> Self {
         let mut builder = Response::builder();
-        builder.status(options.status as u16);
+        builder.status(options.status);
 
         if let Some(headers) = options.headers {
             for key in headers.keys() {

@@ -21,7 +21,7 @@ use crate::Headers;
 /// ```
 #[derive(Clone, Debug)]
 pub struct Response {
-    status: u16,
+    status: i32,
     headers: Headers,
     // TODO: Support Stream bodies when napi.rs supports it
     body: Bytes,
@@ -48,7 +48,7 @@ impl Response {
     /// assert_eq!(response.log(), "log");
     /// assert_eq!(response.exception(), Some(&"exception".to_string()));
     /// ```
-    pub fn new<B, L>(status: u16, headers: Headers, body: B, log: L, exception: Option<String>) -> Self
+    pub fn new<B, L>(status: i32, headers: Headers, body: B, log: L, exception: Option<String>) -> Self
     where
         B: Into<Bytes>,
         L: Into<Bytes>
@@ -121,7 +121,7 @@ impl Response {
     ///
     /// assert_eq!(response.status(), 200);
     /// ```
-    pub fn status(&self) -> u16 {
+    pub fn status(&self) -> i32 {
         self.status
     }
 
@@ -217,7 +217,7 @@ impl Response {
 /// ```
 #[derive(Clone)]
 pub struct ResponseBuilder {
-    status: Option<u16>,
+    status: Option<i32>,
     headers: Headers,
     pub(crate) body: BytesMut,
     pub(crate) log: BytesMut,
@@ -288,7 +288,7 @@ impl ResponseBuilder {
     ///
     /// assert_eq!(response.status(), 300);
     /// ```
-    pub fn status(&mut self, status: u16) -> &mut Self {
+    pub fn status(&mut self, status: i32) -> &mut Self {
         self.status = Some(status);
         self
     }
@@ -333,6 +333,11 @@ impl ResponseBuilder {
         self
     }
 
+    pub fn body_write<B: Into<BytesMut>>(&mut self, body: B) -> &mut Self {
+        self.body.extend_from_slice(&body.into());
+        self
+    }
+
     /// Sets the log of the response.
     ///
     /// # Example
@@ -348,6 +353,11 @@ impl ResponseBuilder {
     /// ```
     pub fn log<L: Into<BytesMut>>(&mut self, log: L) -> &mut Self {
         self.log = log.into();
+        self
+    }
+
+    pub fn log_write<L: Into<BytesMut>>(&mut self, log: L) -> &mut Self {
+        self.log.extend_from_slice(&log.into());
         self
     }
 

@@ -11,9 +11,7 @@
 // #![deny(clippy::all)]
 
 mod embed;
-mod sys;
 
-pub use lang_handler::{Handler, Headers, Request, Response, RequestBuilder, Url};
+pub use lang_handler::{Handler, Headers, Header, Request, Response, RequestBuilder, Url};
 
 pub use embed::Embed;
-pub use self::sys::*;

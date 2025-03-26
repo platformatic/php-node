@@ -74,7 +74,7 @@ export declare class Headers {
    * }
    * ```
    */
-  get(key: string): Array<string> | null
+  get(key: string): Array<string>
   /**
    * Set a header key/value pair.
    *
