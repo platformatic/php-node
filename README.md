@@ -9,6 +9,20 @@ get the linker to find the PHP shared library correctly when building. This
 will probably need to be platform-specific so we'll want to figure out a better
 solution later...
 
+Building PHP itself is straightforward. Here's the basic configuration:
+
+```sh
+git clone https://github.com/php/php-src.git
+cd php-src
+./buildconf
+./configure --enable-shared --enable-embed=shared --enable-zts --without-iconv
+make -j$([[ "$(uname)" == "Darwin" ]] && sysctl -n hw.physicalcpu || nproc)
+sudo make install
+```
+
+We'll probably want to build with additional extensions later, but this is a
+good starting point.
+
 ## Various learnings
 
 ### php://input
