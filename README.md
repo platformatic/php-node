@@ -2,6 +2,13 @@
 
 Proof-of-concept PHP stackable. Not yet working...
 
+# Build Notes
+
+Currently need to use `RUSTFLAGS="-C link-args=-Wl,-rpath,/usr/local/lib"` to
+get the linker to find the PHP shared library correctly when building. This
+will probably need to be platform-specific so we'll want to figure out a better
+solution later...
+
 ## Various learnings
 
 ### php://input

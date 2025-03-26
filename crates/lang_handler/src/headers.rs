@@ -1,18 +1,36 @@
-use std::collections::HashMap;
+use std::collections::{
+    HashMap,
+    hash_map::Entry
+};
+
+#[derive(Debug, Clone)]
+pub enum Header {
+    Single(String),
+    Multiple(Vec<String>),
+}
+
+impl From<&Header> for String {
+    fn from(header: &Header) -> String {
+        match header {
+            Header::Single(value) => value.to_owned(),
+            Header::Multiple(values) => values.join(","),
+        }
+    }
+}
 
 /// A multi-map of HTTP headers.
 ///
 /// # Examples
 ///
 /// ```
-/// use lang_handler::Headers;
-///
+/// # use lang_handler::Headers;
 /// let mut headers = Headers::new();
 /// headers.set("Content-Type", "text/plain");
+///
 /// assert_eq!(headers.get("Content-Type"), Some(&vec!["text/plain".to_string()]));
 /// ```
 #[derive(Debug, Clone)]
-pub struct Headers(HashMap<String, Vec<String>>);
+pub struct Headers(HashMap<String, Header>);
 
 impl Headers {
     /// Creates a new `Headers` instance.
@@ -20,57 +38,159 @@ impl Headers {
     /// # Examples
     ///
     /// ```
-    /// use lang_handler::Headers;
-    ///
+    /// # use lang_handler::Headers;
     /// let headers = Headers::new();
     /// ```
     pub fn new() -> Self {
         Headers(HashMap::new())
     }
 
-    /// Returns the values associated with a header field.
+    /// Returns the value associated with a header field.
     ///
     /// # Examples
     ///
     /// ```
-    /// use lang_handler::Headers;
-    ///
+    /// # use lang_handler::Headers;
     /// let mut headers = Headers::new();
-    /// headers.set("Accept", "text/plain");
-    /// headers.set("Accept", "application/json");
+    /// headers.add("Accept", "text/plain");
+    /// headers.add("Accept", "application/json");
     ///
-    /// assert_eq!(headers.get("Accept"), Some(&vec![
-    ///   "text/plain".to_string(),
-    ///   "application/json".to_string()
-    /// ]));
+    /// assert_eq!(headers.get("Accept"), Some(&"application/json".to_string()));
     /// ```
-    pub fn get<K>(&self, key: K) -> Option<&Vec<String>>
+    pub fn get<K>(&self, key: K) -> Option<String>
     where
         K: AsRef<str>,
     {
-        self.0.get(key.as_ref())
+        match self.0.get(key.as_ref()) {
+            Some(Header::Single(value)) => Some(value.clone()),
+            Some(Header::Multiple(values)) => values.last().cloned(),
+            None => None,
+        }
     }
 
-    /// Sets a header field with the given value.
+    /// Returns all values associated with a header field as a Vec<String>.
     ///
     /// # Examples
     ///
     /// ```
-    /// use lang_handler::Headers;
+    /// # use lang_handler::Headers;
+    /// let mut headers = Headers::new();
+    /// headers.add("Accept", "text/plain");
+    /// headers.add("Accept", "application/json");
     ///
+    /// assert_eq!(headers.get_all("Accept"), vec![
+    ///   "text/plain".to_string(),
+    ///   "application/json".to_string()
+    /// ]);
+    ///
+    /// headers.set("Content-Type", "text/plain");
+    /// assert_eq!(headers.get_all("Content-Type"), vec!["text/plain".to_string()]);
+    /// ```
+    pub fn get_all<K>(&self, key: K) -> Vec<String>
+    where
+        K: AsRef<str>,
+    {
+        match self.0.get(key.as_ref()) {
+            Some(Header::Single(value)) => vec![value.clone()],
+            Some(Header::Multiple(values)) => values.clone(),
+            None => Vec::new(),
+        }
+    }
+
+    /// Returns all values associated with a header field as a single
+    /// comma-separated string.
+    ///
+    /// # Note
+    ///
+    /// Some headers support delivery as a comma-separated list of values,
+    /// but most require multiple header lines to send multiple values.
+    /// Typically you should use `get_all` rather than `get_line` and send
+    /// multiple header lines.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use lang_handler::Headers;
+    /// let mut headers = Headers::new();
+    /// headers.add("Accept", "text/plain");
+    /// headers.add("Accept", "application/json");
+    ///
+    /// assert_eq!(headers.get_line("Accept"), Some("text/plain,application/json".to_string()));
+    /// ```
+    pub fn get_line<K>(&self, key: K) -> Option<String>
+    where
+        K: AsRef<str>,
+    {
+        let result = self.get_all(key).join(",");
+        if result.is_empty() {
+            None
+        } else {
+            Some(result)
+        }
+    }
+
+    /// Sets a header field, replacing any existing values.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use lang_handler::Headers;
     /// let mut headers = Headers::new();
     /// headers.set("Content-Type", "text/plain");
-    /// assert_eq!(headers.get("Content-Type"), Some(&vec!["text/plain".to_string()]));
+    /// headers.set("Content-Type", "text/html");
+    ///
+    /// assert_eq!(headers.get("Content-Type"), Some(&"text/html".to_string()));
     /// ```
     pub fn set<K, V>(&mut self, key: K, value: V)
     where
         K: Into<String>,
         V: Into<String>,
     {
-        self.0
-            .entry(key.into())
-            .or_insert_with(Vec::new)
-            .push(value.into());
+        self.0.insert(key.into(), Header::Single(value.into()));
+    }
+
+    /// Add a header with the given value without replacing existing ones.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use lang_handler::Headers;
+    /// let mut headers = Headers::new();
+    /// headers.add("Accept", "text/plain");
+    /// headers.add("Accept", "application/json");
+    ///
+    /// assert_eq!(headers.get("Accept"), Some(&vec![
+    ///   "text/plain".to_string(),
+    ///   "application/json".to_string()
+    /// ]));
+    /// ```
+    pub fn add<K, V>(&mut self, key: K, value: V)
+    where
+        K: Into<String>,
+        V: Into<String>,
+    {
+        let key = key.into();
+        let value = value.into();
+
+        match self.0.entry(key) {
+            Entry::Vacant(e) => {
+                e.insert(Header::Single(value));
+            }
+            Entry::Occupied(mut e) => {
+                let header = e.get_mut();
+                *header = match header {
+                    Header::Single(existing_value) => {
+                        let mut values = vec![existing_value.clone()];
+                        values.push(value);
+                        Header::Multiple(values)
+                    }
+                    Header::Multiple(values) => {
+                        values.push(value);
+                        Header::Multiple(values.clone())
+                    }
+                };
+            }
+        }
     }
 
     /// Removes a header field.
@@ -78,8 +198,7 @@ impl Headers {
     /// # Examples
     ///
     /// ```
-    /// use lang_handler::Headers;
-    ///
+    /// # use lang_handler::Headers;
     /// let mut headers = Headers::new();
     /// headers.set("Content-Type", "text/plain");
     /// headers.remove("Content-Type");
@@ -97,8 +216,7 @@ impl Headers {
     /// # Examples
     ///
     /// ```
-    /// use lang_handler::Headers;
-    ///
+    /// # use lang_handler::Headers;
     /// let mut headers = Headers::new();
     /// headers.set("Accept", "text/plain");
     /// headers.set("Accept", "application/json");
@@ -107,26 +225,7 @@ impl Headers {
     ///    println!("{}: {:?}", key, values);
     /// }
     /// ```
-    pub fn iter(&self) -> impl Iterator<Item = (&String, &Vec<String>)> {
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &Header)> {
         self.0.iter()
-    }
-
-    /// Returns an iterator over the header values.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use lang_handler::Headers;
-    ///
-    /// let mut headers = Headers::new();
-    /// headers.set("Accept", "text/plain");
-    /// headers.set("Accept", "application/json");
-    ///
-    /// for value in headers.iter_values() {
-    ///    println!("{:?}", value);
-    /// }
-    /// ```
-    pub fn iter_values(&self) -> impl Iterator<Item = &String> {
-        self.0.values().flatten()
     }
 }

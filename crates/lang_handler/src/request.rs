@@ -39,6 +39,9 @@ pub struct Request {
     body: Bytes,
 }
 
+unsafe impl Sync for Request {}
+unsafe impl Send for Request {}
+
 impl Request {
     /// Creates a new `Request` with the given method, URL, headers, and body.
     ///

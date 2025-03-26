@@ -111,18 +111,14 @@ pub extern "C" fn lh_headers_get(headers: *const lh_headers_t, key: *const std::
         assert!(!headers.is_null());
         &*headers
     };
+
     let key = unsafe {
         assert!(!key.is_null());
         std::ffi::CStr::from_ptr(key).to_str().unwrap()
     };
+
     match headers.inner.get(key) {
-        Some(values) => {
-            if values.len() > 0 {
-                values[values.len() - 1].as_ptr() as *const std::os::raw::c_char
-            } else {
-                std::ptr::null()
-            }
-        },
+        Some(value) => value.as_ptr() as *const std::os::raw::c_char,
         None => std::ptr::null()
     }
 }
@@ -141,20 +137,17 @@ pub extern "C" fn lh_headers_get_nth(headers: *const lh_headers_t, key: *const s
         assert!(!headers.is_null());
         &*headers
     };
+
     let key = unsafe {
         assert!(!key.is_null());
         std::ffi::CStr::from_ptr(key).to_str().unwrap()
     };
-    match headers.inner.get(key) {
-        Some(values) => {
-            if index < values.len() {
-                values[index].as_ptr() as *const std::os::raw::c_char
-            } else {
-                std::ptr::null()
-            }
-        },
-        None => std::ptr::null()
-    }
+
+    headers.inner
+        .get_all(key)
+        .get(index)
+        .map(|value| value.as_ptr() as *const std::os::raw::c_char)
+        .unwrap_or(std::ptr::null())
 }
 
 /// Set a header with the given key and value.
@@ -519,7 +512,7 @@ impl From<&lh_response_t> for Response {
 /// lh_response_t* response = lh_response_new(200, headers, "Hello, world!");
 /// ```
 #[no_mangle]
-pub extern "C" fn lh_response_new(status_code: u16, headers: *mut lh_headers_t, body: *const c_char) -> *mut lh_response_t {
+pub extern "C" fn lh_response_new(status_code: i32, headers: *mut lh_headers_t, body: *const c_char) -> *mut lh_response_t {
     let body_str = unsafe { CStr::from_ptr(body).to_bytes() };
     let headers = unsafe { &*headers };
     Box::into_raw(Box::new(Response::new(status_code, headers.into(), body_str, "", None).into()))
@@ -554,7 +547,7 @@ pub extern "C" fn lh_response_free(response: *mut lh_response_t) {
 /// uint16_t status = lh_response_status(response);
 /// ```
 #[no_mangle]
-pub extern "C" fn lh_response_status(response: *const lh_response_t) -> u16 {
+pub extern "C" fn lh_response_status(response: *const lh_response_t) -> i32 {
     let response = unsafe { &*response };
     response.inner.status()
 }
@@ -668,7 +661,7 @@ pub extern "C" fn lh_response_builder_extend(response: *const lh_response_t) -> 
 /// lh_response_builder_status_code(builder, 200);
 /// ```
 #[no_mangle]
-pub extern "C" fn lh_response_builder_status_code(builder: *mut lh_response_builder_t, status_code: u16) {
+pub extern "C" fn lh_response_builder_status_code(builder: *mut lh_response_builder_t, status_code: i32) {
     let builder = unsafe { &mut *builder };
     builder.inner.status(status_code);
 }

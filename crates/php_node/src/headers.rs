@@ -4,7 +4,7 @@ use napi::Result;
 use napi::{sys, sys::{napi_env, napi_value}};
 use napi::bindgen_prelude::*;
 
-use php::Headers;
+use php::{Headers, Header};
 
 pub struct Entry<K, V>(K, V);
 
@@ -94,8 +94,8 @@ impl PhpHeaders {
     /// }
     /// ```
     #[napi]
-    pub fn get(&self, key: String) -> Option<Vec<String>> {
-        self.headers.get(&key).map(|v| v.to_owned())
+    pub fn get(&self, key: String) -> Vec<String> {
+        self.headers.get_all(&key)
     }
 
     /// Set a header key/value pair.
@@ -140,7 +140,12 @@ impl PhpHeaders {
     /// ```
     #[napi]
     pub fn entries(&self) -> Vec<Entry<String, Vec<String>>> {
-        self.headers.iter().map(|(k, v)| Entry(k.to_owned(), v.to_owned())).collect()
+        self.headers.iter().map(|(k, v)| {
+            Entry(k.to_owned(), match v {
+                Header::Single(value) => vec![value.clone()],
+                Header::Multiple(vec) => vec.clone(),
+            })
+        }).collect()
     }
 
     /// Get an iterator over the header keys.
@@ -176,6 +181,6 @@ impl PhpHeaders {
     /// ```
     #[napi]
     pub fn values(&self) -> Vec<String> {
-        self.headers.iter_values().map(|v| v.to_owned()).collect()
+        self.entries().into_iter().flat_map(|entry| entry.1).collect()
     }
 }

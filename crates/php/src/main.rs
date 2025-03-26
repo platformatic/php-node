@@ -5,6 +5,13 @@ pub fn main() {
         http_response_code(123);
         header('Content-Type: text/plain');
         echo file_get_contents(\"php://input\");
+        echo \"\n\";
+
+        $headers = apache_request_headers();
+
+        foreach ($headers as $header => $value) {
+            echo \"$header: $value\n\";
+        }
     ";
     let filename = Some("test.php");
     let embed = Embed::new_with_args(code, filename, std::env::args());
