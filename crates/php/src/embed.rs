@@ -19,6 +19,39 @@ use ext_php_rs::{
 
 use lang_handler::{Handler, Request, Response, ResponseBuilder};
 
+// This is a helper to ensure that PHP is initialized and deinitialized at the
+// appropriate times.
+struct PhpInit;
+
+impl PhpInit {
+    pub fn new<S>(_argv: Vec<S>) -> Self
+    where
+        S: AsRef<str>
+    {
+        // let argv: Vec<&str> = argv.iter().map(|s| s.as_ref()).collect();
+        // let argc = argv.len() as i32;
+        // let mut argv_ptrs = argv
+        //     .iter()
+        //     .map(|v| v.as_ptr() as *mut c_char)
+        //     .collect::<Vec<*mut c_char>>();
+
+        unsafe {
+            ext_php_rs_sapi_startup();
+        }
+        PhpInit
+    }
+}
+
+impl Drop for PhpInit {
+    fn drop(&mut self) {
+        unsafe {
+            ext_php_rs_sapi_shutdown();
+        }
+    }
+}
+
+static PHP_INIT: OnceLock<PhpInit> = OnceLock::new();
+
 /// Embed a PHP script into a Rust application to handle HTTP requests.
 #[derive(Debug, Clone)]
 pub struct Embed {
@@ -90,7 +123,7 @@ impl Embed {
     /// # // TODO: Uncomment when argv gets passed through correctly.
     /// # // assert_eq!(response.body(), "Hello, world!");
     /// ```
-    pub fn new_with_argv<C, F, S>(code: C, filename: Option<F>, _argv: Vec<S>) -> Self
+    pub fn new_with_argv<C, F, S>(code: C, filename: Option<F>, argv: Vec<S>) -> Self
     where
         C: Into<String>,
         F: Into<String>,
@@ -111,8 +144,9 @@ impl Embed {
             .build()
             .expect("Failed to build SAPI module");
 
+        PHP_INIT.get_or_init(|| PhpInit::new(argv));
+
         unsafe {
-            ext_php_rs_sapi_startup();
             sapi_startup(sapi.into_raw());
             php_module_startup(sapi.into_raw(), get_module());
         }
@@ -130,7 +164,6 @@ impl Drop for Embed {
         unsafe {
             php_module_shutdown();
             sapi_shutdown();
-            ext_php_rs_sapi_shutdown();
         }
     }
 }
@@ -159,8 +192,11 @@ impl Handler for Embed {
     /// ```
     fn handle(&self, request: Request) -> Result<Response, Self::Error> {
         let startup = self.sapi.startup.expect("No startup function");
-        unsafe {
-            startup(self.sapi.into_raw());
+        let result = unsafe {
+            startup(self.sapi.into_raw())
+        };
+        if result != ZEND_RESULT_CODE_SUCCESS {
+            return Err("Failed to start PHP SAPI".to_string());
         }
 
         let mut request_context = try_catch_first(|| {
@@ -170,6 +206,13 @@ impl Handler for Embed {
             let filename = CString::new(self.filename.clone().unwrap_or("<unnamed>".to_string()))
                 .unwrap();
 
+            let request_method = CString::new(request.method()).unwrap();
+            let url = request.url();
+            let query_string = CString::new(url.query().unwrap_or("")).unwrap();
+            let path_translated = CString::new(url.path()).unwrap();
+
+            println!("request_method: {:?}", request_method);
+
             let mut request_context = RequestContext::new(request.clone());
 
             // Set server context
@@ -177,17 +220,18 @@ impl Handler for Embed {
                 let mut globals = SapiGlobals::get_mut();
                 globals.server_context = &mut request_context as *mut _ as *mut c_void;
 
+                globals.options |= ext_php_rs::ffi::SAPI_OPTION_NO_CHDIR as i32;
+
                 // Reset state
                 globals.request_info.argc = 0;
                 globals.request_info.argv = std::ptr::null_mut();
                 globals.sapi_headers.http_response_code = 200;
 
                 // Set request info from request
-                globals.request_info.request_method = CString::new(request.method()).unwrap().into_raw();
-                let url = request.url();
-                globals.request_info.query_string = CString::new(url.query().unwrap_or("")).unwrap().into_raw();
-                globals.request_info.path_translated = CString::new(url.path()).unwrap().into_raw();
-                globals.request_info.request_uri = CString::new(url.path()).unwrap().into_raw();
+                globals.request_info.request_method = request_method.into_raw();
+                globals.request_info.query_string = query_string.into_raw();
+                globals.request_info.path_translated = path_translated.clone().into_raw();
+                globals.request_info.request_uri = path_translated.into_raw();
 
                 // TODO: Add auth fields
 
@@ -397,8 +441,14 @@ pub extern "C" fn sapi_module_startup(sapi_module: *mut SapiModule) -> ext_php_r
     let result = unsafe {
         php_module_startup(sapi_module, std::ptr::null_mut())
     };
+    if result != ZEND_RESULT_CODE_SUCCESS {
+        return result;
+    }
 
     result
+    // unsafe {
+    //     php_module_startup(SapiModule::get_mut().into_raw(), std::ptr::null_mut())
+    // }
 }
 
 #[no_mangle]
