@@ -12,6 +12,8 @@ pub struct PhpResponseOptions {
     /// The HTTP status code for the response.
     pub status: i32,
     /// The headers for the response.
+    /// TODO: Figure out how to accept a Headers instance
+    /// TODO: Figure out how to support both single values without array wrap
     pub headers: Option<HashMap<String, Vec<String>>>,
     /// The body for the response.
     pub body: Option<Uint8Array>,

@@ -2,7 +2,7 @@ import test from 'ava'
 
 import { Php, Request } from '../index.js'
 
-test('input/output streams work', async (t) => {
+test('Support input/output streams', async (t) => {
   const php = new Php({
     argv: process.argv,
     file: 'index.php',
@@ -24,7 +24,7 @@ test('input/output streams work', async (t) => {
   t.is(res.body.toString('utf8'), 'Hello, from PHP!')
 })
 
-test('logs work', async (t) => {
+test('Capture logs', async (t) => {
   const php = new Php({
     file: 'index.php',
     code: `
@@ -42,7 +42,7 @@ test('logs work', async (t) => {
   t.is(res.log.toString('utf8'), 'Hello, from error_log!\n')
 })
 
-test('exceptions work', async (t) => {
+test('Capture exceptions', async (t) => {
   const php = new Php({
     file: 'index.php',
     code: `
@@ -57,15 +57,16 @@ test('exceptions work', async (t) => {
 
   const res = await php.handleRequest(req)
 
-  // TODO: should exceptions be thrown back to the caller?
+  // TODO: should exceptions be thrown rather than message-captured?
   t.assert(/Hello, from PHP!/.test(res.exception))
 })
 
-test('request headers work', async (t) => {
+test('Support request and response headers', async (t) => {
   const php = new Php({
     file: 'index.php',
     code: `
       $headers = apache_request_headers();
+      header("X-Test: Hello, from PHP!");
       echo $headers["X-Test"];
     `
   })
@@ -81,4 +82,5 @@ test('request headers work', async (t) => {
   const res = await php.handleRequest(req)
   t.is(res.status, 200)
   t.is(res.body.toString(), 'Hello, from Node.js!')
+  t.is(res.headers.get('X-Test'), 'Hello, from PHP!')
 })

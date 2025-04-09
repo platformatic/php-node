@@ -45,7 +45,26 @@ impl Headers {
         Headers(HashMap::new())
     }
 
-    /// Returns the value associated with a header field.
+    /// Checks if a header field exists.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use lang_handler::Headers;
+    /// let mut headers = Headers::new();
+    /// headers.set("Content-Type", "text/plain");
+    ///
+    /// assert!(headers.has("Content-Type"));
+    /// assert!(!headers.has("Accept"));
+    /// ```
+    pub fn has<K>(&self, key: K) -> bool
+    where
+        K: AsRef<str>,
+    {
+        self.0.contains_key(key.as_ref())
+    }
+
+    /// Returns the last single value associated with a header field.
     ///
     /// # Examples
     ///
@@ -202,6 +221,7 @@ impl Headers {
     /// let mut headers = Headers::new();
     /// headers.set("Content-Type", "text/plain");
     /// headers.remove("Content-Type");
+    ///
     /// assert_eq!(headers.get("Content-Type"), None);
     /// ```
     pub fn remove<K>(&mut self, key: K)
@@ -209,6 +229,40 @@ impl Headers {
         K: AsRef<str>,
     {
         self.0.remove(key.as_ref());
+    }
+
+    /// Clears all headers.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use lang_handler::Headers;
+    /// let mut headers = Headers::new();
+    /// headers.set("Content-Type", "text/plain");
+    /// headers.set("Accept", "application/json");
+    /// headers.clear();
+    ///
+    /// assert_eq!(headers.get("Content-Type"), None);
+    /// assert_eq!(headers.get("Accept"), None);
+    /// ```
+    pub fn clear(&mut self) {
+        self.0.clear();
+    }
+
+    /// Returns the number of headers.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use lang_handler::Headers;
+    /// let mut headers = Headers::new();
+    /// headers.set("Content-Type", "text/plain");
+    /// headers.set("Accept", "application/json");
+    ///
+    /// assert_eq!(headers.len(), 2);
+    /// ```
+    pub fn len(&self) -> usize {
+        self.0.len()
     }
 
     /// Returns an iterator over the headers.

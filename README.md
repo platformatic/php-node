@@ -2,12 +2,9 @@
 
 Proof-of-concept PHP stackable. Not yet working...
 
-# Build Notes
+## Build Notes
 
-Currently need to use `RUSTFLAGS="-C link-args=-Wl,-rpath,/usr/local/lib"` to
-get the linker to find the PHP shared library correctly when building. This
-will probably need to be platform-specific so we'll want to figure out a better
-solution later...
+### Building PHP
 
 Building PHP itself is straightforward. Here's the basic configuration:
 
@@ -21,7 +18,95 @@ sudo make install
 ```
 
 We'll probably want to build with additional extensions later, but this is a
-good starting point.
+good starting point. Extensions should be able to load dynamically anyway,
+so easy enough to add them separately.
+
+### ext-php-rs
+
+This presently expects the [Complete SAPI Implementation PR](https://github.com/platformatic/ext-php-rs/pull/1)
+to be checked out at the same level as this repo under the name ext-php-rs.
+
+```
+base
+├── ext-php-rs
+└── php-stackable
+```
+
+### Building the Node.js module
+
+Presently the rpath to link needs to be configured via environment variable.
+This tells the linker where to find the PHP shared library.
+
+```sh
+RUSTFLAGS="-C link-args=-Wl,-rpath,/usr/local/lib" npm run build
+```
+
+By default rpath is left to its default, which I _think_ means cwd, but I need
+to verify that. It can be configured in `build.rs` to a different location,
+but that is likely platform-specific so would need to figure out the correct
+locations if we want to use platform-available PHP builds.
+
+Alternatively, we could ship our own libphp alongside the .node file, but I
+need to figure out how to configure the rpath correctly to work with the
+relative path. This may be the better option, but would also need to figure
+out if that then dictates where extensions need to live.
+
+## Usage
+
+```js
+import { Php, Request } from '@platformatic/php'
+
+// Construct a PHP environment for handling requests.
+// This corresponds to a single entrypoint file.
+// Presently the file contents must be passed in as a string,
+// but it could be made to take only a filename and read the file
+// contents itself.
+//
+// NOTE: This presently only supports eval-mode, not tag-mode, meaning no
+// interleaving with html using <?php ?> tags. Tag mode will be ready soon.
+const php = new Php({
+  file: 'index.php',
+  code: `
+    $headers = apache_request_headers();
+    echo $headers["X-Test"];
+  `
+})
+
+// This is a container to help translate Node.js requests into PHP requests.
+//
+// Future ideas:
+// - Support passing in a Node.js IncomingMessage object directly?
+// - Support web standard Request objects?
+const req = new Request({
+  method: 'GET',
+  url: 'http://example.com/test.php',
+  headers: {
+    'X-Test': ['Hello, from Node.js!']
+  }
+})
+
+// The request container gets passed into the PHP environment which processes
+// it and returns a response. Request processing is handled by the NodePlatform
+// worker pool to avoid blocking the Node.js thread.
+const res = await php.handleRequest(req)
+
+// PHP requests can also be processed synchronously, though this is not
+// recommended as it will block the Node.js thread for the entire life of the
+// PHP request. It may be useful in some cases though.
+const res = php.handleRequestSync(req)
+
+// Properties available on Response objects:
+console.log({
+  status: res.status, // status code
+  headers: new Map(res.headers.entries()), // headers is a Headers object
+  body: res.body.toString(), // body is a Buffer
+  log: res.log.toString(), // log is a Buffer
+  exception: res.exception // exception is a string
+})
+
+// Headers is a multimap which implements all the standard Map methods plus
+// some additional helpers. See the tests in __test__ for more details.
+```
 
 ## Various learnings
 
