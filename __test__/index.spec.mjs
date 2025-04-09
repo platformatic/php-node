@@ -55,26 +55,18 @@ test('exceptions work', async (t) => {
     url: 'http://example.com/test.php'
   })
 
-  await t.throwsAsync(php.handleRequest(req), {
-    message: 'Hello, from PHP!'
-  })
+  const res = await php.handleRequest(req)
+
+  // TODO: should exceptions be thrown back to the caller?
+  t.assert(/Hello, from PHP!/.test(res.exception))
 })
 
 test('request headers work', async (t) => {
   const php = new Php({
     file: 'index.php',
     code: `
-      foreach($_SERVER as $key => $val) {
-        if ($key == 'argv') {
-          for ($i = 0; $i < count($val); $i++) {
-            $arg = $val[$i];
-            echo "argv[$i]: $arg\n";
-          }
-          continue;
-        }
-
-        echo "$key: $val\n";
-      }
+      $headers = apache_request_headers();
+      echo $headers["X-Test"];
     `
   })
 
@@ -87,7 +79,6 @@ test('request headers work', async (t) => {
   })
 
   const res = await php.handleRequest(req)
-  console.log(res)
   t.is(res.status, 200)
-  t.is(res.body.toString(), 'Hello, from PHP!')
+  t.is(res.body.toString(), 'Hello, from Node.js!')
 })

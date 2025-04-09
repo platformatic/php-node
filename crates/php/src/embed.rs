@@ -1,8 +1,9 @@
 use std::{
     collections::HashMap,
     env::Args,
-    ffi::{c_char, c_int, c_void, CStr, CString},
-    sync::OnceLock
+    ffi::{c_char, c_int, c_void, CStr, CString, NulError},
+    ops::Deref,
+    sync::{OnceLock, RwLock}
 };
 
 use bytes::{Buf, BufMut};
@@ -10,20 +11,21 @@ use bytes::{Buf, BufMut};
 use ext_php_rs::{
     builders::{IniBuilder, SapiBuilder},
     embed::{ext_php_rs_sapi_shutdown, ext_php_rs_sapi_startup, SapiModule},
+    error::Error,
     ffi::{
         php_module_shutdown, php_module_startup, php_request_shutdown, php_request_startup, sapi_header_struct, sapi_shutdown, sapi_startup, zend_eval_string_ex, ZEND_RESULT_CODE_SUCCESS
     },
     prelude::*,
-    zend::{try_catch_first, ExecutorGlobals, SapiGlobals, SapiHeader, SapiHeaders}
+    zend::{try_catch, try_catch_first, ExecutorGlobals, SapiGlobals, SapiHeader, SapiHeaders}
 };
 
 use lang_handler::{Handler, Request, Response, ResponseBuilder};
 
 // This is a helper to ensure that PHP is initialized and deinitialized at the
 // appropriate times.
-struct PhpInit;
+struct Sapi(Box<SapiModule>);
 
-impl PhpInit {
+impl Sapi {
     pub fn new<S>(_argv: Vec<S>) -> Self
     where
         S: AsRef<str>
@@ -35,29 +37,107 @@ impl PhpInit {
         //     .map(|v| v.as_ptr() as *mut c_char)
         //     .collect::<Vec<*mut c_char>>();
 
+        let sapi = SapiBuilder::new("php_lang_handler", "PHP Lang Handler")
+            .startup_function(sapi_module_startup)
+            // .shutdown_function(sapi_module_shutdown)
+            // .activate_function(sapi_module_activate)
+            .deactivate_function(sapi_module_deactivate)
+            .ub_write_function(sapi_module_ub_write)
+            .send_header_function(sapi_module_send_header)
+            .read_post_function(sapi_module_read_post)
+            .read_cookies_function(sapi_module_read_cookies)
+            // .register_server_variables_function(sapi_module_register_server_variables)
+            .log_message_function(sapi_module_log_message)
+            // .executable_location(args.get(0))
+            .build()
+            .expect("Failed to build SAPI module");
+
+        let mut boxed = Box::new(sapi);
+
         unsafe {
             ext_php_rs_sapi_startup();
+
+            sapi_startup(boxed.as_mut());
+            php_module_startup(boxed.as_mut(), get_module());
         }
-        PhpInit
+
+        Sapi(boxed)
+    }
+
+    fn do_startup(&mut self) -> Result<(), String> {
+        let sapi = self.0.as_mut();
+        let startup = sapi.startup.expect("No startup function");
+        if unsafe { startup(sapi) } != ZEND_RESULT_CODE_SUCCESS {
+            return Err("Failed to start PHP SAPI".to_string());
+        }
+        Ok(())
+    }
+
+    pub fn startup() -> Result<(), String> {
+        match SAPI_INIT.get() {
+            None => {
+                Err("SAPI not initialized".to_string())
+            }
+            Some(rwlock) => {
+                match rwlock.write() {
+                    Err(_) => {
+                        Err("Failed to lock SAPI instance".to_string())
+                    }
+                    Ok(mut sapi) => {
+                        sapi.do_startup()?;
+                        Ok(())
+                    }
+                }
+            }
+        }
     }
 }
 
-impl Drop for PhpInit {
+impl Drop for Sapi {
     fn drop(&mut self) {
         unsafe {
+            php_module_shutdown();
+            sapi_shutdown();
+
             ext_php_rs_sapi_shutdown();
         }
     }
 }
 
-static PHP_INIT: OnceLock<PhpInit> = OnceLock::new();
+static SAPI_INIT: OnceLock<RwLock<Sapi>> = OnceLock::new();
+
+#[derive(Debug)]
+pub enum EmbedException {
+    SapiStartupError,
+    RequestStartupError,
+    InvalidCString(NulError),
+    HeaderNotFound(String),
+    ExecuteError,
+    Exception(String),
+    Bailout,
+    ResponseError,
+}
+
+impl std::fmt::Display for EmbedException {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EmbedException::SapiStartupError => write!(f, "SAPI startup error"),
+            EmbedException::RequestStartupError => write!(f, "Request startup error"),
+            EmbedException::InvalidCString(e) => write!(f, "CString conversion error: {}", e.to_string()),
+            EmbedException::HeaderNotFound(header) => write!(f, "Header not found: {}", header),
+            EmbedException::ExecuteError => write!(f, "Script execution error"),
+            EmbedException::Exception(e) => write!(f, "Exception thrown: {}", e),
+            EmbedException::Bailout => write!(f, "PHP bailout"),
+            EmbedException::ResponseError => write!(f, "Error building response"),
+        }
+    }
+}
 
 /// Embed a PHP script into a Rust application to handle HTTP requests.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Embed {
     code: String,
-    filename: Option<String>,
-    sapi: SapiModule
+    filename: Option<String>
 }
 
 // An embed instance may be constructed on the main thread and then shared
@@ -129,47 +209,17 @@ impl Embed {
         F: Into<String>,
         S: AsRef<str> + std::fmt::Debug,
     {
-        let sapi = SapiBuilder::new("php_lang_handler", "PHP Lang Handler")
-            .startup_function(sapi_module_startup)
-            // .shutdown_function(sapi_module_shutdown)
-            // .activate_function(sapi_module_activate)
-            .deactivate_function(sapi_module_deactivate)
-            .ub_write_function(sapi_module_ub_write)
-            .send_header_function(sapi_module_send_header)
-            .read_post_function(sapi_module_read_post)
-            .read_cookies_function(sapi_module_read_cookies)
-            // .register_server_variables_function(sapi_module_register_server_variables)
-            .log_message_function(sapi_module_log_message)
-            // .executable_location(args.get(0))
-            .build()
-            .expect("Failed to build SAPI module");
-
-        PHP_INIT.get_or_init(|| PhpInit::new(argv));
-
-        unsafe {
-            sapi_startup(sapi.into_raw());
-            php_module_startup(sapi.into_raw(), get_module());
-        }
+        SAPI_INIT.get_or_init(|| RwLock::new(Sapi::new(argv)));
 
         Embed {
             code: code.into(),
-            filename: filename.map(|v| v.into()),
-            sapi
-        }
-    }
-}
-
-impl Drop for Embed {
-    fn drop(&mut self) {
-        unsafe {
-            php_module_shutdown();
-            sapi_shutdown();
+            filename: filename.map(|v| v.into())
         }
     }
 }
 
 impl Handler for Embed {
-    type Error = String;
+    type Error = EmbedException;
 
     /// Handles an HTTP request.
     ///
@@ -191,143 +241,182 @@ impl Handler for Embed {
     /// //assert_eq!(response.body(), "Hello, world!");
     /// ```
     fn handle(&self, request: Request) -> Result<Response, Self::Error> {
-        let startup = self.sapi.startup.expect("No startup function");
-        let result = unsafe {
-            startup(self.sapi.into_raw())
-        };
-        if result != ZEND_RESULT_CODE_SUCCESS {
-            return Err("Failed to start PHP SAPI".to_string());
+        unsafe {
+            ext_php_rs::embed::ext_php_rs_sapi_per_thread_init();
         }
 
-        let mut request_context = try_catch_first(|| {
-            let code = CString::new(self.code.clone())
-                .unwrap();
+        // Initialize the SAPI module
+        Sapi::startup().map_err(|_| EmbedException::SapiStartupError)?;
 
-            let filename = CString::new(self.filename.clone().unwrap_or("<unnamed>".to_string()))
-                .unwrap();
+        // Get code and filename to execute
+        let code = cstr(self.code.clone())?;
+        let filename = default_cstr("<unnamed>", self.filename.clone())?;
 
-            let request_method = CString::new(request.method()).unwrap();
-            let url = request.url();
-            let query_string = CString::new(url.query().unwrap_or("")).unwrap();
-            let path_translated = CString::new(url.path()).unwrap();
+        // Extract request information
+        let request_method = cstr(request.method())?;
 
-            println!("request_method: {:?}", request_method);
+        let url = request.url();
+        let query_string = cstr(url.query().unwrap_or(""))?;
+        let path_translated = cstr(url.path())?;
 
-            let mut request_context = RequestContext::new(request.clone());
+        let headers = request.headers();
+        let content_type = nullable_cstr(headers.get("Content-Type"))?;
+        let content_length = headers.get("Content-Length")
+            .map(|v| v.parse::<i64>().unwrap_or(0))
+            .unwrap_or(0);
+        let cookie_data = nullable_cstr(headers.get("Cookie"))?;
+
+        let response = try_catch_first(|| {
+            RequestContext::for_request(request.clone());
 
             // Set server context
             {
                 let mut globals = SapiGlobals::get_mut();
-                globals.server_context = &mut request_context as *mut _ as *mut c_void;
-
                 globals.options |= ext_php_rs::ffi::SAPI_OPTION_NO_CHDIR as i32;
 
                 // Reset state
+                globals.request_info.proto_num = 110;
                 globals.request_info.argc = 0;
                 globals.request_info.argv = std::ptr::null_mut();
                 globals.sapi_headers.http_response_code = 200;
 
                 // Set request info from request
-                globals.request_info.request_method = request_method.into_raw();
-                globals.request_info.query_string = query_string.into_raw();
-                globals.request_info.path_translated = path_translated.clone().into_raw();
-                globals.request_info.request_uri = path_translated.into_raw();
+                globals.request_info.request_method = request_method;
+                globals.request_info.query_string = query_string;
+                globals.request_info.path_translated = path_translated.clone();
+                globals.request_info.request_uri = path_translated;
 
                 // TODO: Add auth fields
 
-                let headers = request.headers();
-                if let Some(content_type) = headers.get("Content-Type") {
-                    globals.request_info.content_type = CString::new(content_type)
-                        .expect("Failed to set content type to request info")
-                        .into_raw();
-                }
-                if let Some(content_length) = headers.get("Content-Length") {
-                    globals.request_info.content_length = content_length.parse()
-                        .expect("Failed to parse content length");
-                }
-                if let Some(cookie) = headers.get("Cookie") {
-                    globals.request_info.cookie_data = CString::new(cookie)
-                        .expect("Failed to set cookie data to request info")
-                        .into_raw();
-                }
+                globals.request_info.content_type = content_type;
+                globals.request_info.content_length = content_length;
+                globals.request_info.cookie_data = cookie_data;
             }
 
-            if unsafe { php_request_startup() } != ZEND_RESULT_CODE_SUCCESS {
-                return Err::<RequestContext, PhpException>(
-                    PhpException::default("Failed to start PHP request".to_string())
-                );
-            }
+            let response = {
+                let _request_scope = RequestScope::new()?;
 
-            {
-                let mut globals = SapiGlobals::get_mut();
-                globals.request_info.proto_num = 110;
-            }
+                // Run script in its own try/catch so bailout doesn't skip request shutdown.
+                try_catch(|| {
+                    if unsafe {
+                        zend_eval_string_ex(code, std::ptr::null_mut(), filename, false)
+                    } != ZEND_RESULT_CODE_SUCCESS {
+                        return Err(EmbedException::ExecuteError);
+                    }
 
-            let eval_result = unsafe {
-                zend_eval_string_ex(code.into_raw(), std::ptr::null_mut(), filename.into_raw(), false)
+                    if let Some(err) = ExecutorGlobals::take_exception() {
+                        {
+                            let mut globals = SapiGlobals::get_mut();
+                            globals.sapi_headers.http_response_code = 500;
+                        }
+
+                        let ex = Error::Exception(err);
+
+                        RequestContext::current().map(|ctx| {
+                            ctx.response_builder().exception(ex.to_string());
+                        });
+
+                        // TODO: Should exceptions be raised or only captured on
+                        // the response builder?
+                        // return Err(EmbedException::Exception(ex.to_string()));
+                    }
+
+                    Ok(())
+                }).map_or_else(|_err| Err(EmbedException::Bailout), |res| res)?;
+
+                {
+                    let (mimetype, http_response_code) = {
+                        let globals = SapiGlobals::get();
+                        (
+                            globals.sapi_headers.mimetype,
+                            globals.sapi_headers.http_response_code
+                        )
+                    };
+
+                    let mime = if mimetype.is_null() {
+                        "text/plain"
+                    } else {
+                        unsafe { CStr::from_ptr(mimetype as *const c_char) }
+                            .to_str()
+                            .unwrap_or("text/plain")
+                    };
+
+                    RequestContext::current().map(|ctx| {
+                        ctx.response_builder()
+                            .status(http_response_code)
+                            .header("Content-Type", mime);
+                    });
+                }
+
+                RequestContext::current().map(|ctx| {
+                    ctx.response_builder().build()
+                }).ok_or(EmbedException::ResponseError)?
             };
-            if eval_result != ZEND_RESULT_CODE_SUCCESS {
-                return Err::<RequestContext, PhpException>(
-                    PhpException::default("Failed to evaluate PHP code".to_string())
-                );
-            }
 
-            if let Some(_err) = ExecutorGlobals::take_exception() {
-                let mut globals = SapiGlobals::get_mut();
-                globals.sapi_headers.http_response_code = 500;
-                // TODO: Figure out how to read exception messages.
-                // request_context.response_builder().exception(err);
-
-                let mut eg = ExecutorGlobals::get_mut();
-                eg.exception = std::ptr::null_mut();
-                eg.exit_status = 1;
-
-                return Err::<RequestContext, PhpException>(
-                    PhpException::default("something went wrong".to_string())
-                );
-            }
-
-            {
-                let mut globals = SapiGlobals::get_mut();
-                globals.sapi_headers.http_response_code = 200;
-
-                let mime = if globals.sapi_headers.mimetype.is_null() {
-                    "text/plain"
-                } else {
-                    unsafe { CStr::from_ptr(globals.sapi_headers.mimetype as *const c_char) }
-                        .to_str()
-                        .unwrap_or("text/plain")
-                };
-
-                request_context.response_builder().header("Content-Type", mime);
-                request_context.response_builder().status(globals.sapi_headers.http_response_code);
-            }
-
-            unsafe {
-                php_request_shutdown(0 as *mut c_void);
-            }
-
-            Ok::<RequestContext, PhpException>(request_context)
+            Ok(response)
         })
-            .expect("Failed to execute PHP script")
-            .expect("Failed to handle request");
+        // Convert CatchError to a PhpException
+        .map_or_else(|_err| Err(EmbedException::Bailout), |res| res)?;
 
-        Ok(request_context.response_builder().build())
+        Ok(response)
+    }
+}
+
+struct RequestScope();
+
+impl RequestScope {
+    fn new() -> Result<Self, EmbedException> {
+        if unsafe { php_request_startup() } != ZEND_RESULT_CODE_SUCCESS {
+            return Err(EmbedException::RequestStartupError);
+        }
+
+        Ok(RequestScope())
+    }
+}
+
+impl Drop for RequestScope {
+    fn drop(&mut self) {
+        unsafe {
+            php_request_shutdown(0 as *mut c_void);
+        }
     }
 }
 
 // The request context for the PHP SAPI.
+#[derive(Debug)]
 struct RequestContext {
     request: Request,
     response_builder: ResponseBuilder
 }
 
 impl RequestContext {
-    // Creates a new request context to handle an HTTP request within the PHP SAPI.
+    // Sets the current request context for the PHP SAPI.
     //
-    // # Arguments
+    // # Examples
     //
-    // * `request` - The HTTP request to handle.
+    // ```
+    // use php::{Request, RequestContext};
+    //
+    // let request = Request::builder()
+    //  .method("GET")
+    //  .url("http://example.com")
+    //  .build();
+    //
+    // let mut context = RequestContext::new(request);
+    // context.make_current();
+    //
+    // assert_eq!(context.request().method(), "GET");
+    // ```
+    fn for_request(request: Request) {
+        let context = Box::new(RequestContext {
+            request,
+            response_builder: ResponseBuilder::new()
+        });
+        let mut globals = SapiGlobals::get_mut();
+        globals.server_context = Box::into_raw(context) as *mut c_void;
+    }
+
+    // Retrieve a mutable reference to the request context
     //
     // # Examples
     //
@@ -339,13 +428,39 @@ impl RequestContext {
     //   .url("http://example.com")
     //   .build();
     //
-    // let context = RequestContext::new(request);
+    // let mut context = RequestContext::new(request);
+    //
+    // SapiGlobals::get_mut().server_context =
+    //   &mut context as *mut RequestContext as *mut c_void;
+    //
+    // let current_context = RequestContext::current();
+    // assert_eq!(current_context.request().method(), "GET");
     // ```
-    fn new(request: Request) -> Self {
-        RequestContext {
-            request,
-            response_builder: ResponseBuilder::new()
+    pub fn current<'a>() -> Option<&'a mut RequestContext> {
+        let ptr = {
+            let globals = SapiGlobals::get();
+            globals.server_context as *mut RequestContext
+        };
+        if ptr.is_null() {
+            return None;
         }
+
+        Some(unsafe {
+            &mut *(ptr as *mut RequestContext)
+        })
+    }
+
+    pub fn reclaim() -> Option<Box<RequestContext>> {
+        let ptr = {
+            let mut globals = SapiGlobals::get_mut();
+            std::mem::replace(&mut globals.server_context, std::ptr::null_mut())
+        };
+        if ptr.is_null() {
+            return None;
+        }
+        Some(unsafe {
+            Box::from_raw(ptr as *mut RequestContext)
+        })
     }
 
     // Returns a reference to the request.
@@ -389,29 +504,6 @@ impl RequestContext {
     }
 }
 
-// Retrieve a mutable reference to the request context
-fn get_mut_context<'a>() -> &'a mut RequestContext {
-    let globals = SapiGlobals::get_mut();
-    unsafe {
-        &mut *(globals.server_context as *mut RequestContext)
-    }
-}
-
-// Reclaim a string given to the SAPI
-fn reclaim_str(ptr: *const i8) -> CString {
-    unsafe {
-        CString::from_raw(ptr as *mut c_char)
-    }
-}
-
-// Drop a string
-fn drop_str(ptr: *const i8) {
-    if ptr.is_null() {
-        return;
-    }
-    drop(reclaim_str(ptr));
-}
-
 //
 // PHP SAPI Functions
 //
@@ -437,49 +529,49 @@ pub extern "C" fn sapi_module_startup(sapi_module: *mut SapiModule) -> ext_php_r
     ini_builder.prepend(config);
 
     unsafe { *sapi_module }.ini_entries = ini_builder.finish();
-
-    let result = unsafe {
-        php_module_startup(sapi_module, std::ptr::null_mut())
-    };
-    if result != ZEND_RESULT_CODE_SUCCESS {
-        return result;
+    unsafe {
+        // php_module_startup(sapi_module, std::ptr::null_mut())
+        php_module_startup(sapi_module, get_module())
     }
-
-    result
-    // unsafe {
-    //     php_module_startup(SapiModule::get_mut().into_raw(), std::ptr::null_mut())
-    // }
 }
 
 #[no_mangle]
 pub extern "C" fn sapi_module_deactivate() -> c_int {
-    let mut globals = SapiGlobals::get_mut();
+    {
+        let mut globals = SapiGlobals::get_mut();
 
-    globals.server_context = std::ptr::null_mut();
-    globals.request_info.argc = 0;
-    globals.request_info.argv = std::ptr::null_mut();
+        globals.server_context = std::ptr::null_mut();
+        globals.request_info.argc = 0;
+        globals.request_info.argv = std::ptr::null_mut();
 
-    drop_str(globals.request_info.request_method);
-    drop_str(globals.request_info.query_string);
-    drop_str(globals.request_info.request_uri);
-    drop_str(globals.request_info.path_translated);
-    drop_str(globals.request_info.content_type);
-    drop_str(globals.request_info.cookie_data);
-    // drop_str(globals.request_info.php_self);
-    // drop_str(globals.request_info.auth_user);
-    // drop_str(globals.request_info.auth_password);
-    // drop_str(globals.request_info.auth_digest);
+        // drop_str(globals.request_info.request_method);
+        // drop_str(globals.request_info.query_string);
+        // drop_str(globals.request_info.request_uri);
+        // drop_str(globals.request_info.path_translated);
+        // drop_str(globals.request_info.content_type);
+        // drop_str(globals.request_info.cookie_data);
+        // drop_str(globals.request_info.php_self);
+        // drop_str(globals.request_info.auth_user);
+        // drop_str(globals.request_info.auth_password);
+        // drop_str(globals.request_info.auth_digest);
+    }
+
+    // TODO: When _is_ it safe to reclaim the request context?
+    // RequestContext::reclaim();
 
     return 0;
 }
 
 #[no_mangle]
 pub extern "C" fn sapi_module_ub_write(str: *const i8, str_length: usize) -> usize {
+    if str.is_null() || str_length == 0 { return 0; }
     let bytes = unsafe {
         std::slice::from_raw_parts(str as *const u8, str_length)
     };
     let len = bytes.len();
-    get_mut_context().response_builder.body_write(bytes);
+    RequestContext::current().map(|ctx| {
+        ctx.response_builder().body_write(bytes);
+    });
     len
 }
 
@@ -500,18 +592,23 @@ pub extern "C" fn sapi_module_send_header(header: *mut SapiHeader, _server_conte
 
     // Header value is None for http version + status line
     if let Some(value) = header.value() {
-        get_mut_context().response_builder.header(name, value);
+        RequestContext::current().map(|ctx| {
+            ctx.response_builder().header(name, value);
+        });
     }
 }
 
 #[no_mangle]
 pub extern "C" fn sapi_module_read_post(buffer: *mut c_char, length: usize) -> usize {
-    let server_context = SapiGlobals::get().server_context as *mut RequestContext;
+    if length == 0 { return 0; }
 
+    let server_context = SapiGlobals::get().server_context as *mut RequestContext;
     let request = unsafe { &mut (*server_context).request };
     let body = request.body();
 
     let length = length.min(body.len());
+    if length == 0 { return 0; }
+
     let chunk = body.take(length);
 
     unsafe {
@@ -522,9 +619,7 @@ pub extern "C" fn sapi_module_read_post(buffer: *mut c_char, length: usize) -> u
 
 #[no_mangle]
 pub extern "C" fn sapi_module_read_cookies() -> *mut c_char {
-    let request_info = SapiGlobals::get().request_info;
-    let result = request_info.cookie_data;
-    result
+    SapiGlobals::get().request_info.cookie_data
 }
 
 // #[no_mangle]
@@ -547,17 +642,58 @@ pub extern "C" fn sapi_module_log_message(message: *const c_char, _syslog_type_i
 //
 
 #[php_function]
-pub fn apache_request_headers() -> HashMap<String, String> {
+pub fn apache_request_headers() -> Result<HashMap<String, String>, String> {
     let mut headers = HashMap::new();
 
-    get_mut_context().request().headers().iter().for_each(|(key, value)| {
-        headers.insert(key.to_string(), value.into());
-    });
+    let request = RequestContext::current().map(|ctx| {
+        ctx.request()
+    }).ok_or("Request context unavailable")?;
 
-    headers
+    for (key, value) in request.headers().iter() {
+        headers.insert(key.to_string(), value.into());
+    }
+
+    Ok(headers)
 }
 
 #[php_module]
 pub fn module(module: ModuleBuilder<'_>) -> ModuleBuilder<'_> {
     module.function(wrap_function!(apache_request_headers))
+}
+
+//
+// CString helpers
+//
+
+fn default_cstr<S: Into<String>, V: Into<String>>(default: S, maybe: Option<V>) -> Result<*mut c_char, EmbedException> {
+    cstr(match maybe {
+        Some(v) => v.into(),
+        None => default.into()
+    })
+}
+
+fn nullable_cstr<S: Into<String>>(maybe: Option<S>) -> Result<*mut c_char, EmbedException> {
+    match maybe {
+        Some(v) => cstr(v.into()),
+        None => Ok(std::ptr::null_mut())
+    }
+}
+
+fn cstr<S: AsRef<str>>(s: S) -> Result<*mut c_char, EmbedException> {
+    CString::new(s.as_ref())
+        .map_err(EmbedException::InvalidCString)
+        .map(|cstr| cstr.into_raw())
+}
+
+fn reclaim_str(ptr: *const i8) -> CString {
+    unsafe {
+        CString::from_raw(ptr as *mut c_char)
+    }
+}
+
+fn drop_str(ptr: *const i8) {
+    if ptr.is_null() {
+        return;
+    }
+    drop(reclaim_str(ptr));
 }

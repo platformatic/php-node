@@ -215,7 +215,7 @@ impl Response {
 /// assert_eq!(response.headers().get("Content-Type"), Some(&vec!["text/plain".to_string()]));
 /// assert_eq!(response.body(), "Hello, World!");
 /// ```
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ResponseBuilder {
     status: Option<i32>,
     headers: Headers,
@@ -358,6 +358,7 @@ impl ResponseBuilder {
 
     pub fn log_write<L: Into<BytesMut>>(&mut self, log: L) -> &mut Self {
         self.log.extend_from_slice(&log.into());
+        self.log.extend_from_slice(b"\n");
         self
     }
 

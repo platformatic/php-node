@@ -116,7 +116,7 @@ impl PhpRuntime {
     pub fn handle_request_sync(&self, request: &PhpRequest) -> Result<PhpResponse> {
         self.embed
             .handle(request.into())
-            .map_err(|err| Error::from_reason(err))
+            .map_err(|err| Error::from_reason(err.to_string()))
             .map(PhpResponse::new)
     }
 }
@@ -135,7 +135,7 @@ impl Task for PhpRequestTask {
     fn compute(&mut self) -> Result<Self::Output> {
         self.embed
             .handle(self.request.clone())
-            .map_err(|err| Error::from_reason(err))
+            .map_err(|err| Error::from_reason(err.to_string()))
     }
 
     // Handle converting the PHP response to a JavaScript response in the main thread.
