@@ -18,7 +18,11 @@ export interface PhpRequestOptions {
   method: string
   /** The URL for the request. */
   url: string
-  /** The headers for the request. */
+  /**
+   * The headers for the request.
+   * TODO: Figure out how to accept a Headers instance
+   * TODO: Figure out how to support both single values without array wrap
+   */
   headers?: Record<string, Array<string>>
   /** The body for the request. */
   body?: Uint8Array
@@ -27,7 +31,11 @@ export interface PhpRequestOptions {
 export interface PhpResponseOptions {
   /** The HTTP status code for the response. */
   status: number
-  /** The headers for the response. */
+  /**
+   * The headers for the response.
+   * TODO: Figure out how to accept a Headers instance
+   * TODO: Figure out how to support both single values without array wrap
+   */
   headers?: Record<string, Array<string>>
   /** The body for the response. */
   body?: Uint8Array
@@ -60,7 +68,7 @@ export declare class Headers {
    */
   constructor()
   /**
-   * Get the values for a given header key.
+   * Get the last set value for a given header key.
    *
    * # Examples
    *
@@ -69,12 +77,57 @@ export declare class Headers {
    * headers.set('Accept', 'application/json');
    * headers.set('Accept', 'text/html');
    *
-   * for (const mime of headers.get('Accept')) {
+   * console.log(headers.get('Accept')); // text/html
+   * ```
+   */
+  get(key: string): string | null
+  /**
+   * Get all values for a given header key.
+   *
+   * # Examples
+   *
+   * ```js
+   * const headers = new Headers();
+   * headers.set('Accept', 'application/json');
+   * headers.set('Accept', 'text/html');
+   *
+   * for (const mime of headers.getAll('Accept')) {
    *   console.log(mime);
    * }
    * ```
    */
-  get(key: string): Array<string>
+  getAll(key: string): Array<string>
+  /**
+   * Get all values for a given header key as a comma-separated string.
+   *
+   * This is useful for headers that can have multiple values, such as `Accept`.
+   * But note that some headers like `Set-Cookie`, expect separate lines.
+   *
+   * # Examples
+   *
+   * ```js
+   * const headers = new Headers();
+   * headers.set('Accept', 'application/json');
+   * headers.set('Accept', 'text/html');
+   *
+   * console.log(headers.getLine('Accept')); // application/json, text/html
+   * ```
+   */
+  getLine(key: string): string | null
+  /**
+   * Check if a header key exists.
+   *
+   * # Examples
+   *
+   * ```js
+   * const headers = new Headers();
+   * headers.set('Content-Type', 'application/json');
+   *
+   * console.log(headers.has('Content-Type')); // true
+   * console.log(headers.has('Accept')); // false
+   * ```
+   */
+  has(key: string): boolean
   /**
    * Set a header key/value pair.
    *
@@ -87,17 +140,61 @@ export declare class Headers {
    */
   set(key: string, value: string): void
   /**
-   * Remove a header key/value pair.
+   * Add a value to a header key.
+   *
+   * # Examples
+   *
+   * ```js
+   * const headers = new Headers();
+   * headers.set('Accept', 'application/json');
+   * headers.add('Accept', 'text/html');
+   *
+   * console.log(headers.get('Accept')); // application/json, text/html
+   * ```
+   */
+  add(key: string, value: string): void
+  /**
+   * Delete a header key/value pair.
    *
    * # Examples
    *
    * ```js
    * const headers = new Headers();
    * headers.set('Content-Type', 'application/json');
-   * headers.remove('Content-Type');
+   * headers.delete('Content-Type');
    * ```
    */
-  remove(key: string): void
+  delete(key: string): void
+  /**
+   * Clear all header entries.
+   *
+   * # Examples
+   *
+   * ```js
+   * const headers = new Headers();
+   * headers.set('Content-Type', 'application/json');
+   * headers.set('Accept', 'application/json');
+   * headers.clear();
+   *
+   * console.log(headers.has('Content-Type')); // false
+   * console.log(headers.has('Accept')); // false
+   * ```
+   */
+  clear(): void
+  /**
+   * Get the number of header entries.
+   *
+   * # Examples
+   *
+   * ```js
+   * const headers = new Headers();
+   * headers.set('Content-Type', 'application/json');
+   * headers.set('Accept', 'application/json');
+   *
+   * console.log(headers.size); // 2
+   * ```
+   */
+  get size(): number
   /**
    * Get an iterator over the header entries.
    *
@@ -146,6 +243,22 @@ export declare class Headers {
    * ```
    */
   values(): Array<string>
+  /**
+   * Execute a callback for each header entry.
+   *
+   * # Examples
+   *
+   * ```js
+   * const headers = new Headers();
+   * headers.set('Content-Type', 'application/json');
+   * headers.set('Accept', 'application/json');
+   *
+   * headers.forEach(([key, values]) => {
+   *   console.log(`${key}: ${values.join(', ')}`);
+   * });
+   * ```
+   */
+  forEach(this: this, callback: (arg0: Array<string>, arg1: string, arg2: this) => void): void
 }
 export type PhpRuntime = Php
 /**
