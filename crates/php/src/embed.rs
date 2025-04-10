@@ -13,13 +13,72 @@ use ext_php_rs::{
     embed::{ext_php_rs_sapi_shutdown, ext_php_rs_sapi_startup, SapiModule},
     error::Error,
     ffi::{
-        php_module_shutdown, php_module_startup, php_request_shutdown, php_request_startup, sapi_header_struct, sapi_shutdown, sapi_startup, zend_eval_string_ex, ZEND_RESULT_CODE_SUCCESS
+        php_module_shutdown,
+        php_module_startup,
+        php_request_shutdown,
+        php_request_startup,
+        php_execute_script,
+        sapi_header_struct,
+        sapi_shutdown,
+        sapi_startup,
+        zend_eval_string_ex,
+        zend_stream_init_filename,
+        ZEND_RESULT_CODE_SUCCESS
     },
     prelude::*,
+    types::ZendStr,
     zend::{try_catch, try_catch_first, ExecutorGlobals, SapiGlobals, SapiHeader, SapiHeaders}
 };
 
 use lang_handler::{Handler, Request, Response, ResponseBuilder};
+use libc::free;
+
+struct memory_stream {
+    ptr: *mut c_char,
+    len: usize,
+    available: usize
+}
+
+#[no_mangle]
+unsafe extern "C" fn memory_stream_reader(handle: *mut c_void, buf: *mut c_char, len: usize) -> isize {
+    let stream = handle as *mut memory_stream;
+    if stream.is_null() {
+        return 0;
+    }
+
+    let stream = unsafe { &mut *stream };
+    if stream.available == 0 {
+        return 0;
+    }
+
+    let read_len = std::cmp::min(len, stream.available);
+    unsafe {
+        std::ptr::copy_nonoverlapping(
+            stream.ptr as *const c_char,
+            buf,
+            read_len
+        );
+    }
+    stream.available -= read_len;
+    stream.ptr = unsafe { stream.ptr.add(read_len) };
+    read_len as isize
+}
+
+#[no_mangle]
+unsafe extern "C" fn memory_stream_fsizer(handle: *mut c_void) -> usize {
+    let stream = handle as *mut memory_stream;
+    if stream.is_null() {
+        return 0;
+    }
+
+    let stream = unsafe { &mut *stream };
+    stream.len - stream.available
+}
+
+#[no_mangle]
+unsafe extern "C" fn memory_stream_closer(_handle: *mut c_void) {
+    // Nothing to do. The memory stream lifetime is managed by Rust
+}
 
 // This is a helper to ensure that PHP is initialized and deinitialized at the
 // appropriate times.
@@ -252,6 +311,46 @@ impl Handler for Embed {
         let code = cstr(self.code.clone())?;
         let filename = default_cstr("<unnamed>", self.filename.clone())?;
 
+        // Prepare memory stream of the code
+        let mut file_handle = unsafe {
+            use ext_php_rs::ffi::{
+                zend_stream,
+                zend_file_handle,
+                _zend_file_handle__bindgen_ty_1
+            };
+
+            let mut mem_stream = memory_stream {
+                ptr: code,
+                len: self.code.len(),
+                available: self.code.len()
+            };
+
+            let stream = zend_stream {
+                handle: &mut mem_stream as *mut _ as *mut c_void,
+                isatty: 0,
+                reader: Some(memory_stream_reader),
+                fsizer: Some(memory_stream_fsizer),
+                closer: Some(memory_stream_closer),
+            };
+
+            let mut file_handle = zend_file_handle {
+                handle: _zend_file_handle__bindgen_ty_1 { stream },
+                filename: std::ptr::null_mut(),
+                opened_path: std::ptr::null_mut(),
+                type_: 2, // ZEND_HANDLE_STREAM
+                primary_script: false,
+                in_list: false,
+                buf: std::ptr::null_mut(),
+                len: 0,
+            };
+
+            zend_stream_init_filename(&mut file_handle, filename);
+            file_handle.handle = _zend_file_handle__bindgen_ty_1 { stream };
+            file_handle.type_ = 2; // ZEND_HANDLE_STREAM
+
+            file_handle
+        };
+
         // Extract request information
         let request_method = cstr(request.method())?;
 
@@ -298,11 +397,15 @@ impl Handler for Embed {
 
                 // Run script in its own try/catch so bailout doesn't skip request shutdown.
                 try_catch(|| {
-                    if unsafe {
-                        zend_eval_string_ex(code, std::ptr::null_mut(), filename, false)
-                    } != ZEND_RESULT_CODE_SUCCESS {
-                        return Err(EmbedException::ExecuteError);
-                    }
+                    unsafe {
+                        php_execute_script(&mut file_handle)
+                    };
+
+                    // if unsafe {
+                    //     zend_eval_string_ex(code, std::ptr::null_mut(), filename, false)
+                    // } != ZEND_RESULT_CODE_SUCCESS {
+                    //     return Err(EmbedException::ExecuteError);
+                    // }
 
                     if let Some(err) = ExecutorGlobals::take_exception() {
                         {
@@ -530,7 +633,6 @@ pub extern "C" fn sapi_module_startup(sapi_module: *mut SapiModule) -> ext_php_r
 
     unsafe { *sapi_module }.ini_entries = ini_builder.finish();
     unsafe {
-        // php_module_startup(sapi_module, std::ptr::null_mut())
         php_module_startup(sapi_module, get_module())
     }
 }
