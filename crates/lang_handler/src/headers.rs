@@ -61,7 +61,7 @@ impl Headers {
     where
         K: AsRef<str>,
     {
-        self.0.contains_key(key.as_ref())
+        self.0.contains_key(key.as_ref().to_lowercase().as_str())
     }
 
     /// Returns the last single value associated with a header field.
@@ -80,7 +80,7 @@ impl Headers {
     where
         K: AsRef<str>,
     {
-        match self.0.get(key.as_ref()) {
+        match self.0.get(key.as_ref().to_lowercase().as_str()) {
             Some(Header::Single(value)) => Some(value.clone()),
             Some(Header::Multiple(values)) => values.last().cloned(),
             None => None,
@@ -109,7 +109,7 @@ impl Headers {
     where
         K: AsRef<str>,
     {
-        match self.0.get(key.as_ref()) {
+        match self.0.get(key.as_ref().to_lowercase().as_str()) {
             Some(Header::Single(value)) => vec![value.clone()],
             Some(Header::Multiple(values)) => values.clone(),
             None => Vec::new(),
@@ -165,7 +165,7 @@ impl Headers {
         K: Into<String>,
         V: Into<String>,
     {
-        self.0.insert(key.into(), Header::Single(value.into()));
+        self.0.insert(key.into().to_lowercase(), Header::Single(value.into()));
     }
 
     /// Add a header with the given value without replacing existing ones.
@@ -188,7 +188,7 @@ impl Headers {
         K: Into<String>,
         V: Into<String>,
     {
-        let key = key.into();
+        let key = key.into().to_lowercase();
         let value = value.into();
 
         match self.0.entry(key) {
@@ -228,7 +228,7 @@ impl Headers {
     where
         K: AsRef<str>,
     {
-        self.0.remove(key.as_ref());
+        self.0.remove(key.as_ref().to_lowercase().as_str());
     }
 
     /// Clears all headers.

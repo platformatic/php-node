@@ -12,7 +12,7 @@ Building PHP itself is straightforward. Here's the basic configuration:
 git clone https://github.com/php/php-src.git
 cd php-src
 ./buildconf
-./configure --enable-shared --enable-embed=shared --enable-zts --without-iconv
+./configure --enable-shared --enable-embed=shared --enable-zts --without-iconv --with-pdo-mysql=mysqlnd --with-mysqli=mysqlnd --with-openssl --with-curl --enable-mbstring
 make -j$([[ "$(uname)" == "Darwin" ]] && sysctl -n hw.physicalcpu || nproc)
 sudo make install
 ```

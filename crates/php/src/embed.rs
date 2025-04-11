@@ -13,21 +13,11 @@ use ext_php_rs::{
     embed::{ext_php_rs_sapi_shutdown, ext_php_rs_sapi_startup, SapiModule},
     error::Error,
     ffi::{
-        php_module_shutdown,
-        php_module_startup,
-        php_request_shutdown,
-        php_request_startup,
-        php_execute_script,
-        sapi_header_struct,
-        sapi_shutdown,
-        sapi_startup,
-        zend_eval_string_ex,
-        zend_stream_init_filename,
-        ZEND_RESULT_CODE_SUCCESS
+        php_execute_script, php_module_shutdown, php_module_startup, php_register_variable, php_request_shutdown, php_request_startup, sapi_header_struct, sapi_shutdown, sapi_startup, zend_eval_string_ex, zend_stream_init_filename, ZEND_RESULT_CODE_SUCCESS
     },
     prelude::*,
-    types::ZendStr,
-    zend::{try_catch, try_catch_first, ExecutorGlobals, SapiGlobals, SapiHeader, SapiHeaders}
+    types::{ZendHashTable, ZendStr},
+    zend::{try_catch, try_catch_first, ExecutorGlobals, ProcessGlobals, SapiGlobals, SapiHeader, SapiHeaders}
 };
 
 use lang_handler::{Handler, Request, Response, ResponseBuilder};
@@ -105,7 +95,7 @@ impl Sapi {
             .send_header_function(sapi_module_send_header)
             .read_post_function(sapi_module_read_post)
             .read_cookies_function(sapi_module_read_cookies)
-            // .register_server_variables_function(sapi_module_register_server_variables)
+            .register_server_variables_function(sapi_module_register_server_variables)
             .log_message_function(sapi_module_log_message)
             // .executable_location(args.get(0))
             .build()
@@ -309,7 +299,34 @@ impl Handler for Embed {
 
         // Get code and filename to execute
         let code = cstr(self.code.clone())?;
-        let filename = default_cstr("<unnamed>", self.filename.clone())?;
+        let cwd = std::env::current_dir()
+            .unwrap_or(std::path::PathBuf::from("/"))
+            .canonicalize()
+            .unwrap();
+        let script_name = default_cstr("<unnamed>",
+            self.filename.clone().map(|v| {
+                cwd.join(v)
+                    .canonicalize()
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .to_owned()
+            })
+        )?;
+
+        // Extract request information
+        let request_method = cstr(request.method())?;
+
+        let url = request.url();
+        let query_string = cstr(url.query().unwrap_or(""))?;
+        let path_translated = script_name;
+
+        let headers = request.headers();
+        let content_type = nullable_cstr(headers.get("Content-Type"))?;
+        let content_length = headers.get("Content-Length")
+            .map(|v| v.parse::<i64>().unwrap_or(0))
+            .unwrap_or(0);
+        let cookie_data = nullable_cstr(headers.get("Cookie"))?;
 
         // Prepare memory stream of the code
         let mut file_handle = unsafe {
@@ -338,32 +355,22 @@ impl Handler for Embed {
                 filename: std::ptr::null_mut(),
                 opened_path: std::ptr::null_mut(),
                 type_: 2, // ZEND_HANDLE_STREAM
-                primary_script: false,
+                primary_script: true,
                 in_list: false,
                 buf: std::ptr::null_mut(),
                 len: 0,
             };
 
-            zend_stream_init_filename(&mut file_handle, filename);
+            zend_stream_init_filename(&mut file_handle, script_name);
             file_handle.handle = _zend_file_handle__bindgen_ty_1 { stream };
+            file_handle.opened_path = file_handle.filename;
             file_handle.type_ = 2; // ZEND_HANDLE_STREAM
+            file_handle.primary_script = true;
+
+            // TODO: Make a scope to do zend_destroy_file_handle at the end.
 
             file_handle
         };
-
-        // Extract request information
-        let request_method = cstr(request.method())?;
-
-        let url = request.url();
-        let query_string = cstr(url.query().unwrap_or(""))?;
-        let path_translated = cstr(url.path())?;
-
-        let headers = request.headers();
-        let content_type = nullable_cstr(headers.get("Content-Type"))?;
-        let content_length = headers.get("Content-Length")
-            .map(|v| v.parse::<i64>().unwrap_or(0))
-            .unwrap_or(0);
-        let cookie_data = nullable_cstr(headers.get("Cookie"))?;
 
         let response = try_catch_first(|| {
             RequestContext::for_request(request.clone());
@@ -377,6 +384,7 @@ impl Handler for Embed {
                 globals.request_info.proto_num = 110;
                 globals.request_info.argc = 0;
                 globals.request_info.argv = std::ptr::null_mut();
+                globals.request_info.headers_read = false;
                 globals.sapi_headers.http_response_code = 200;
 
                 // Set request info from request
@@ -612,12 +620,13 @@ impl RequestContext {
 //
 
 static HARDCODED_INI: &str = "
-    display_errors=0
+    display_errors=1
     register_argc_argv=1
     log_errors=1
     implicit_flush=1
     memory_limit=128MB
     output_buffering=0
+    enable_post_data_reading=1
 ";
 
 #[no_mangle]
@@ -631,7 +640,12 @@ pub extern "C" fn sapi_module_startup(sapi_module: *mut SapiModule) -> ext_php_r
 
     ini_builder.prepend(config);
 
-    unsafe { *sapi_module }.ini_entries = ini_builder.finish();
+    let mut sapi = unsafe { *sapi_module };
+    sapi.ini_entries = ini_builder.finish();
+    // sapi.php_ini_ignore_cwd = 1;
+    // sapi.phpinfo_as_text = 1;
+    // sapi.php_ini_path_override = "";
+
     unsafe {
         php_module_startup(sapi_module, get_module())
     }
@@ -724,10 +738,85 @@ pub extern "C" fn sapi_module_read_cookies() -> *mut c_char {
     SapiGlobals::get().request_info.cookie_data
 }
 
-// #[no_mangle]
-// pub extern "C" fn sapi_module_register_server_variables(vars: *mut ext_php_rs::zend::Zval) {
-//     ext_php_rs::ffi::php_import_environment_variables();
-// }
+#[no_mangle]
+pub extern "C" fn sapi_module_register_server_variables(vars: *mut ext_php_rs::types::Zval) {
+    unsafe {
+        if let Some(php_import_environment_variables) = ext_php_rs::ffi::php_import_environment_variables {
+            php_import_environment_variables(vars);
+        }
+
+        let globals = SapiGlobals::get();
+        let req_info = &globals.request_info;
+
+        let script_name = c"".as_ptr();
+        let script_filename = req_info.path_translated;
+
+        php_register_variable(
+            cstr("PHP_SELF").unwrap(),
+            script_name,
+            vars
+        );
+        php_register_variable(
+            cstr("SCRIPT_NAME").unwrap(),
+            script_name,
+            vars
+        );
+        php_register_variable(
+            cstr("SCRIPT_FILENAME").unwrap(),
+            script_filename,
+            vars
+        );
+        php_register_variable(
+            cstr("PATH_TRANSLATED").unwrap(),
+            script_filename,
+            vars
+        );
+        php_register_variable(
+            cstr("DOCUMENT_ROOT").unwrap(),
+            c"".as_ptr(),
+            vars
+        );
+
+        // TODO: This should pull from the _real_ headers
+        php_register_variable(
+            cstr("HTTP_HOST").unwrap(),
+            c"localhost:3000".as_ptr(),
+            vars
+        );
+
+        if !req_info.request_method.is_null() {
+            php_register_variable(
+                cstr("REQUEST_METHOD").unwrap(),
+                req_info.request_method,
+                vars
+            );
+        }
+
+        if !req_info.cookie_data.is_null() {
+            php_register_variable(
+                cstr("COOKIE").unwrap(),
+                req_info.cookie_data,
+                vars
+            );
+        }
+
+        if !req_info.query_string.is_null() {
+            php_register_variable(
+                cstr("QUERY_STRING").unwrap(),
+                req_info.query_string,
+                vars
+            );
+        }
+
+        if !req_info.request_uri.is_null() {
+            php_register_variable(
+                cstr("REQUEST_URI").unwrap(),
+                req_info.request_uri,
+                vars
+            );
+        }
+    };
+}
 
 #[no_mangle]
 pub extern "C" fn sapi_module_log_message(message: *const c_char, _syslog_type_int: c_int) {
