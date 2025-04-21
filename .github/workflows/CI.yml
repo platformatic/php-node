@@ -33,27 +33,33 @@ jobs:
       fail-fast: false
       matrix:
         settings:
-          # TODO: Do we need to care about x86_64 macOS?
-          # NOTE: Unable to force link bison on macOS 13, which php-src requires.
-          # - host: macos-13
-          #   target: x86_64-apple-darwin
-          #   # build: pnpm build --target x86_64-apple-darwin
-          #   build: pnpm build
-          #   setup: |
-          #     brew install autoconf automake libtool re2c bison
-          #     brew link --force bison
+          #
+          # macOS
+          #
 
           - host: macos-15
             target: aarch64-apple-darwin
             # build: pnpm build --target aarch64-apple-darwin
             build: pnpm build
             setup: |
-              brew install autoconf automake libtool re2c bison
-              brew link bison --force
+              brew install autoconf automake libtool re2c bison libiconv
+
+          # TODO: Do we need to care about x86_64 macOS?
+          # NOTE: Unable to force link bison on macOS 13, which php-src requires.
+          - host: macos-13
+            target: x86_64-apple-darwin
+            # build: pnpm build --target x86_64-apple-darwin
+            build: pnpm build
+            setup: |
+              brew install autoconf automake libtool re2c bison libiconv
+
+          #
+          # Linux
+          #
 
           - host: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian
+            # docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian
             build: pnpm build --target x86_64-unknown-linux-gnu
             setup: |
               sudo apt-get update
@@ -62,24 +68,29 @@ jobs:
                 bison re2c libonig-dev
 
           # TODO: Can't use the musl container, need to build with ssh-agent access.
-          - host: ubuntu-latest
-            target: x86_64-unknown-linux-musl
-            docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-alpine
-            build: pnpm build --target x86_64-unknown-linux-musl
-            setup: |
-              sudo apt-get update
-              sudo apt-get install -y libssl-dev pkg-config build-essential \
-                libcurl4-openssl-dev autoconf libxml2-dev libsqlite3-dev \
-                bison re2c libonig-dev
-              rustup target add x86_64-unknown-linux-musl
+          # TODO: Fails because missing x86_64-linux-musl-gcc
+          # - host: ubuntu-latest
+          #   target: x86_64-unknown-linux-musl
+          #   # docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-alpine
+          #   build: pnpm build --target x86_64-unknown-linux-musl
+          #   setup: |
+          #     sudo apt-get update
+          #     sudo apt-get install -y libssl-dev pkg-config build-essential \
+          #       libcurl4-openssl-dev autoconf libxml2-dev libsqlite3-dev \
+          #       bison re2c libonig-dev
+          #     rustup target add x86_64-unknown-linux-musl
 
-          # - host: windows-latest
-          #   target: aarch64-pc-windows-msvc
-          #   build: pnpm build --target aarch64-pc-windows-msvc
+          #
+          # Windows
+          #
 
           # - host: windows-latest
           #   target: x86_64-pc-windows-msvc
           #   build: pnpm build --target x86_64-pc-windows-msvc
+
+          # - host: windows-latest
+          #   target: aarch64-pc-windows-msvc
+          #   build: pnpm build --target aarch64-pc-windows-msvc
 
           # - host: windows-latest
           #   target: i686-pc-windows-msvc
@@ -92,6 +103,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: setup pnpm
         uses: pnpm/action-setup@v4
+        with:
+          version: 10
       - name: Setup node
         uses: actions/setup-node@v4
         if: ${{ !matrix.settings.docker }}
@@ -121,7 +134,7 @@ jobs:
           version: 0.13.0
       - name: Setup toolchain
         run: ${{ matrix.settings.setup }}
-        if: ${{ matrix.settings.setup }}
+        if: ${{ (matrix.settings.setup) && (!matrix.settings.docker) }}
         shell: bash
       - name: Checkout php-src
         uses: actions/checkout@v4
@@ -141,35 +154,59 @@ jobs:
         if: ${{ !matrix.settings.docker }}
         shell: bash
         run: |
+          # Use brew bison and libiconv manually. Force linking does not work on macOS 13
+          if [[ "$(uname)" == "Darwin" ]]; then
+            export PATH="$(brew --prefix bison)/bin:$(brew --prefix libiconv)/bin:$PATH"
+            export LDFLAGS="$LDFLAGS -L$(brew --prefix bison)/lib -L$(brew --prefix libiconv)/lib"
+          fi
+
           cd php-src
           ./buildconf
           ./configure --enable-shared --enable-embed=shared --enable-zts --without-iconv --with-pdo-mysql=mysqlnd --with-mysqli=mysqlnd --with-openssl --with-curl --enable-mbstring
           make -j$([[ "$(uname)" == "Darwin" ]] && sysctl -n hw.physicalcpu || nproc)
           sudo make install
+
+          # Copy libs to be accessible by napi.rs build
+          cp libs/* ..
       - name: Build in docker
         uses: addnab/docker-run-action@v3
         if: ${{ matrix.settings.docker }}
+        env:
+          ID_RSA: ${{ secrets.SECRET_REPO_DEPLOY_KEY }}
         with:
           image: ${{ matrix.settings.docker }}
           options: '--user 0:0 -v ${{ github.workspace }}/.cargo-cache/git/db:/usr/local/cargo/git/db -v ${{ github.workspace }}/.cargo/registry/cache:/usr/local/cargo/registry/cache -v ${{ github.workspace }}/.cargo/registry/index:/usr/local/cargo/registry/index -v ${{ github.workspace }}:/build -w /build'
           run: |
+            ${{ matrix.settings.setup }}
+
             # Build PHP
             cd php-src
             ./buildconf
             ./configure --enable-shared --enable-embed=shared --enable-zts --without-iconv --with-pdo-mysql=mysqlnd --with-mysqli=mysqlnd --with-openssl --with-curl --enable-mbstring
             make -j$([[ "$(uname)" == "Darwin" ]] && sysctl -n hw.physicalcpu || nproc)
             sudo make install
+
+            # Copy libs to be accessible by napi.rs build
+            cp libs/* ..
+
             cd ..
 
-            corepack enable
-            corepack prepare --activate
+            mkdir -p ~/.ssh
+            echo "$ID_RSA" >> ~/.ssh/id_rsa
 
-            ${{ matrix.settings.setup }}
+            corepack disable
+            npm i -g pnpm
+
             ${{ matrix.settings.build }}
       - name: Build
         run: ${{ matrix.settings.build }}
         if: ${{ !matrix.settings.docker }}
         shell: bash
+      # - name: Fix rpath to libphp dynamic library
+      #   shell: bash
+      #   run: |
+      #     EXT=$([[ "$(uname)" == "Darwin" ]] && echo "dylib" || echo "so")
+      #     install_name_tool -change @rpath/libphp.$EXT @loader_path/libphp.$EXT ${{ env.APP_NAME }}.*.node
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -185,9 +222,9 @@ jobs:
       fail-fast: false
       matrix:
         settings:
-          # - host: macos-latest
-          #   target: x86_64-apple-darwin
-          #   architecture: x64
+          - host: macos-latest
+            target: x86_64-apple-darwin
+            architecture: x64
           - host: macos-latest
             target: aarch64-apple-darwin
             architecture: arm64
@@ -195,7 +232,6 @@ jobs:
           #   target: x86_64-pc-windows-msvc
           #   architecture: x64
         node:
-          - '18'
           - '20'
           - '22'
     runs-on: ${{ matrix.settings.host }}
@@ -203,6 +239,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: setup pnpm
         uses: pnpm/action-setup@v4
+        with:
+          version: 10
       - name: Setup node
         uses: actions/setup-node@v4
         with:
@@ -223,7 +261,7 @@ jobs:
         run: pnpm test
 
   test-linux-binding:
-    name: Test bindings on Linux-x64-gnu - node@${{ matrix.node }}
+    name: Test bindings on ${{ matrix.target }} - node@${{ matrix.node }}
     needs:
       - build
     strategy:
@@ -231,12 +269,11 @@ jobs:
       matrix:
         target:
           - x86_64-unknown-linux-gnu
-          - x86_64-unknown-linux-musl
+          # - x86_64-unknown-linux-musl
           # Not supported yet. Need ubuntu-24.04-arm runner
           # - aarch64-unknown-linux-gnu
           # - aarch64-unknown-linux-musl
         node:
-          - '18'
           - '20'
           - '22'
     runs-on: ${{ contains(matrix.target, 'aarch64') && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
@@ -244,6 +281,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: setup pnpm
         uses: pnpm/action-setup@v4
+        with:
+          version: 10
       - name: Setup node
         uses: actions/setup-node@v4
         with:
@@ -295,6 +334,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: setup pnpm
         uses: pnpm/action-setup@v4
+        with:
+          version: 10
       - name: Setup node
         uses: actions/setup-node@v4
         with:
@@ -328,11 +369,14 @@ jobs:
   #     - lint
   #     - test-linux-binding
   #     - test-macOS-windows-binding
-  #     - universal-macOS
+  #     # TODO: Enable this if/when x86_64 builds are enabled
+  #     # - universal-macOS
   #   steps:
   #     - uses: actions/checkout@v4
   #     - name: setup pnpm
   #       uses: pnpm/action-setup@v4
+  #       with:
+  #         version: 10
   #     - name: Setup node
   #       uses: actions/setup-node@v4
   #       with:

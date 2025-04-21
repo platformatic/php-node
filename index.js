@@ -310,9 +310,9 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { Headers, Php, Request, Response } = nativeBinding
+const { Headers, Request, Response, Php } = nativeBinding
 
 module.exports.Headers = Headers
-module.exports.Php = Php
 module.exports.Request = Request
 module.exports.Response = Response
+module.exports.Php = Php

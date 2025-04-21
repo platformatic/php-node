@@ -12,6 +12,6 @@
 
 mod embed;
 
-pub use lang_handler::{Handler, Headers, Header, Request, Response, RequestBuilder, Url};
+pub use lang_handler::{Handler, Header, Headers, Request, RequestBuilder, Response, Url};
 
 pub use embed::Embed;
