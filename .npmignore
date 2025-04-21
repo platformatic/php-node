@@ -6,8 +6,7 @@ npm
 .eslintrc
 .prettierignore
 rustfmt.toml
-yarn.lock
+pnpm-lock.yaml
 *.node
-.yarn
 __test__
 renovate.json

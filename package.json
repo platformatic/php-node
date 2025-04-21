@@ -21,7 +21,9 @@
   "license": "MIT",
   "devDependencies": {
     "@napi-rs/cli": "^2.18.4",
-    "ava": "^6.0.1"
+    "@oxc-node/core": "^0.0.23",
+    "ava": "^6.0.1",
+    "oxlint": "^0.16.0"
   },
   "ava": {
     "timeout": "3m"
@@ -33,10 +35,11 @@
     "artifacts": "napi artifacts",
     "build": "napi build --cargo-name php_node --platform --release",
     "build:debug": "napi build --cargo-name php_node --platform",
+    "lint": "oxlint",
     "prepublishOnly": "napi prepublish -t npm",
     "test": "ava __test__/**.spec.mjs",
     "universal": "napi universal",
     "version": "napi version"
   },
-  "packageManager": "yarn@4.6.0"
+  "packageManager": "pnpm@10.9.0"
 }
