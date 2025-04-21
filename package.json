@@ -40,6 +40,5 @@
     "test": "ava __test__/**.spec.mjs",
     "universal": "napi universal",
     "version": "napi version"
-  },
-  "packageManager": "pnpm@10.9.0"
+  }
 }

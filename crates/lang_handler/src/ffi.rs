@@ -1,4 +1,7 @@
-use std::{ffi, ffi::{CStr, CString, c_char}};
+use std::{
+  ffi,
+  ffi::{c_char, CStr, CString},
+};
 
 use bytes::{Buf, BufMut};
 
@@ -15,29 +18,29 @@ use crate::{Headers, Request, RequestBuilder, Response, ResponseBuilder, Url};
 /// ```
 #[no_mangle]
 pub extern "C" fn lh_reclaim_str(url: *const c_char) {
-    unsafe {
-        drop(CString::from_raw(url as *mut c_char));
-    }
+  unsafe {
+    drop(CString::from_raw(url as *mut c_char));
+  }
 }
 
 /// A multi-map of HTTP headers. Each key can have multiple values.
 #[allow(non_camel_case_types)]
 pub struct lh_headers_t {
-    inner: Headers,
+  inner: Headers,
 }
 
 /// Convert a `Headers` into a `lh_headers_t`.
 impl From<Headers> for lh_headers_t {
-    fn from(inner: Headers) -> Self {
-        Self { inner }
-    }
+  fn from(inner: Headers) -> Self {
+    Self { inner }
+  }
 }
 
 /// Convert a `&lh_headers_t` into a `Headers`.
 impl From<&lh_headers_t> for Headers {
-    fn from(headers: &lh_headers_t) -> Headers {
-        headers.inner.clone()
-    }
+  fn from(headers: &lh_headers_t) -> Headers {
+    headers.inner.clone()
+  }
 }
 
 /// Create a new `lh_headers_t`.
@@ -49,8 +52,8 @@ impl From<&lh_headers_t> for Headers {
 /// ```
 #[no_mangle]
 pub extern "C" fn lh_headers_new() -> *mut lh_headers_t {
-    let headers = Headers::new();
-    Box::into_raw(Box::new(headers.into()))
+  let headers = Headers::new();
+  Box::into_raw(Box::new(headers.into()))
 }
 
 /// Free a `lh_headers_t`.
@@ -66,11 +69,11 @@ pub extern "C" fn lh_headers_new() -> *mut lh_headers_t {
 /// ```
 #[no_mangle]
 pub extern "C" fn lh_headers_free(headers: *mut lh_headers_t) {
-    if !headers.is_null() {
-        unsafe {
-            drop(Box::from_raw(headers));
-        }
+  if !headers.is_null() {
+    unsafe {
+      drop(Box::from_raw(headers));
     }
+  }
 }
 
 /// Get the number of headers with the given key.
@@ -82,19 +85,22 @@ pub extern "C" fn lh_headers_free(headers: *mut lh_headers_t) {
 /// size_t count = lh_headers_count(headers, "Accept");
 /// ```
 #[no_mangle]
-pub extern "C" fn lh_headers_count(headers: *const lh_headers_t, key: *const std::os::raw::c_char) -> usize {
-    let headers = unsafe {
-        assert!(!headers.is_null());
-        &*headers
-    };
-    let key = unsafe {
-        assert!(!key.is_null());
-        std::ffi::CStr::from_ptr(key).to_str().unwrap()
-    };
-    match headers.inner.get(key) {
-        Some(value) => value.len(),
-        None => 0
-    }
+pub extern "C" fn lh_headers_count(
+  headers: *const lh_headers_t,
+  key: *const std::os::raw::c_char,
+) -> usize {
+  let headers = unsafe {
+    assert!(!headers.is_null());
+    &*headers
+  };
+  let key = unsafe {
+    assert!(!key.is_null());
+    std::ffi::CStr::from_ptr(key).to_str().unwrap()
+  };
+  match headers.inner.get(key) {
+    Some(value) => value.len(),
+    None => 0,
+  }
 }
 
 /// Get the value of the last header with the given key.
@@ -106,21 +112,24 @@ pub extern "C" fn lh_headers_count(headers: *const lh_headers_t, key: *const std
 /// const char* value = lh_headers_get(headers, "Accept");
 /// ```
 #[no_mangle]
-pub extern "C" fn lh_headers_get(headers: *const lh_headers_t, key: *const std::os::raw::c_char) -> *const std::os::raw::c_char {
-    let headers = unsafe {
-        assert!(!headers.is_null());
-        &*headers
-    };
+pub extern "C" fn lh_headers_get(
+  headers: *const lh_headers_t,
+  key: *const std::os::raw::c_char,
+) -> *const std::os::raw::c_char {
+  let headers = unsafe {
+    assert!(!headers.is_null());
+    &*headers
+  };
 
-    let key = unsafe {
-        assert!(!key.is_null());
-        std::ffi::CStr::from_ptr(key).to_str().unwrap()
-    };
+  let key = unsafe {
+    assert!(!key.is_null());
+    std::ffi::CStr::from_ptr(key).to_str().unwrap()
+  };
 
-    match headers.inner.get(key) {
-        Some(value) => value.as_ptr() as *const std::os::raw::c_char,
-        None => std::ptr::null()
-    }
+  match headers.inner.get(key) {
+    Some(value) => value.as_ptr() as *const std::os::raw::c_char,
+    None => std::ptr::null(),
+  }
 }
 
 /// Get the value of the nth header with the given key.
@@ -132,22 +141,27 @@ pub extern "C" fn lh_headers_get(headers: *const lh_headers_t, key: *const std::
 /// const char* value = lh_headers_get_nth(headers, "Accept", 0);
 /// ```
 #[no_mangle]
-pub extern "C" fn lh_headers_get_nth(headers: *const lh_headers_t, key: *const std::os::raw::c_char, index: usize) -> *const std::os::raw::c_char {
-    let headers = unsafe {
-        assert!(!headers.is_null());
-        &*headers
-    };
+pub extern "C" fn lh_headers_get_nth(
+  headers: *const lh_headers_t,
+  key: *const std::os::raw::c_char,
+  index: usize,
+) -> *const std::os::raw::c_char {
+  let headers = unsafe {
+    assert!(!headers.is_null());
+    &*headers
+  };
 
-    let key = unsafe {
-        assert!(!key.is_null());
-        std::ffi::CStr::from_ptr(key).to_str().unwrap()
-    };
+  let key = unsafe {
+    assert!(!key.is_null());
+    std::ffi::CStr::from_ptr(key).to_str().unwrap()
+  };
 
-    headers.inner
-        .get_all(key)
-        .get(index)
-        .map(|value| value.as_ptr() as *const std::os::raw::c_char)
-        .unwrap_or(std::ptr::null())
+  headers
+    .inner
+    .get_all(key)
+    .get(index)
+    .map(|value| value.as_ptr() as *const std::os::raw::c_char)
+    .unwrap_or(std::ptr::null())
 }
 
 /// Set a header with the given key and value.
@@ -159,40 +173,47 @@ pub extern "C" fn lh_headers_get_nth(headers: *const lh_headers_t, key: *const s
 /// lh_headers_set(headers, "Accept", "application/json");
 /// ```
 #[no_mangle]
-pub extern "C" fn lh_headers_set(headers: *mut lh_headers_t, key: *const std::os::raw::c_char, value: *const std::os::raw::c_char) {
-    let headers = unsafe {
-        assert!(!headers.is_null());
-        &mut *headers
-    };
-    let key = unsafe {
-        assert!(!key.is_null());
-        std::ffi::CStr::from_ptr(key).to_str().unwrap().to_string()
-    };
-    let value = unsafe {
-        assert!(!value.is_null());
-        std::ffi::CStr::from_ptr(value).to_str().unwrap().to_string()
-    };
-    headers.inner.set(key, value);
+pub extern "C" fn lh_headers_set(
+  headers: *mut lh_headers_t,
+  key: *const std::os::raw::c_char,
+  value: *const std::os::raw::c_char,
+) {
+  let headers = unsafe {
+    assert!(!headers.is_null());
+    &mut *headers
+  };
+  let key = unsafe {
+    assert!(!key.is_null());
+    std::ffi::CStr::from_ptr(key).to_str().unwrap().to_string()
+  };
+  let value = unsafe {
+    assert!(!value.is_null());
+    std::ffi::CStr::from_ptr(value)
+      .to_str()
+      .unwrap()
+      .to_string()
+  };
+  headers.inner.set(key, value);
 }
 
 /// An HTTP request. Includes method, URL, headers, and body.
 #[allow(non_camel_case_types)]
 pub struct lh_request_t {
-    inner: Request,
+  inner: Request,
 }
 
 /// Convert a `Request` into a `lh_request_t`.
 impl From<Request> for lh_request_t {
-    fn from(inner: Request) -> Self {
-        Self { inner }
-    }
+  fn from(inner: Request) -> Self {
+    Self { inner }
+  }
 }
 
 /// Convert a `&lh_request_t` into a `Request`.
 impl From<&lh_request_t> for Request {
-    fn from(request: &lh_request_t) -> Request {
-        request.inner.clone()
-    }
+  fn from(request: &lh_request_t) -> Request {
+    request.inner.clone()
+  }
 }
 
 /// Create a new `lh_request_t`.
@@ -204,22 +225,22 @@ impl From<&lh_request_t> for Request {
 /// ```
 #[no_mangle]
 pub extern "C" fn lh_request_new(
-    method: *const ffi::c_char,
-    url: *const ffi::c_char,
-    headers: *mut lh_headers_t,
-    body: *const ffi::c_char,
+  method: *const ffi::c_char,
+  url: *const ffi::c_char,
+  headers: *mut lh_headers_t,
+  body: *const ffi::c_char,
 ) -> *mut lh_request_t {
-    let method = unsafe { CStr::from_ptr(method).to_string_lossy().into_owned() };
-    let url_str = unsafe { CStr::from_ptr(url).to_string_lossy().into_owned() };
-    let url = Url::parse(&url_str).unwrap();
-    let body = if body.is_null() {
-        None
-    } else {
-        Some(unsafe { CStr::from_ptr(body).to_bytes() })
-    };
-    let headers = unsafe { &*headers };
-    let request = Request::new(method, url, headers.into(), body.unwrap_or(&[]));
-    Box::into_raw(Box::new(request.into()))
+  let method = unsafe { CStr::from_ptr(method).to_string_lossy().into_owned() };
+  let url_str = unsafe { CStr::from_ptr(url).to_string_lossy().into_owned() };
+  let url = Url::parse(&url_str).unwrap();
+  let body = if body.is_null() {
+    None
+  } else {
+    Some(unsafe { CStr::from_ptr(body).to_bytes() })
+  };
+  let headers = unsafe { &*headers };
+  let request = Request::new(method, url, headers.into(), body.unwrap_or(&[]));
+  Box::into_raw(Box::new(request.into()))
 }
 
 /// Free a `lh_request_t`.
@@ -235,11 +256,11 @@ pub extern "C" fn lh_request_new(
 /// ```
 #[no_mangle]
 pub extern "C" fn lh_request_free(request: *mut lh_request_t) {
-    if !request.is_null() {
-        unsafe {
-            drop(Box::from_raw(request));
-        }
+  if !request.is_null() {
+    unsafe {
+      drop(Box::from_raw(request));
     }
+  }
 }
 
 /// Get the method of the request.
@@ -252,8 +273,8 @@ pub extern "C" fn lh_request_free(request: *mut lh_request_t) {
 /// ```
 #[no_mangle]
 pub extern "C" fn lh_request_method(request: *const lh_request_t) -> *const ffi::c_char {
-    let request = unsafe { &*request };
-    CString::new(request.inner.method()).unwrap().into_raw()
+  let request = unsafe { &*request };
+  CString::new(request.inner.method()).unwrap().into_raw()
 }
 
 /// Get the URL of the request.
@@ -266,8 +287,8 @@ pub extern "C" fn lh_request_method(request: *const lh_request_t) -> *const ffi:
 /// ```
 #[no_mangle]
 pub extern "C" fn lh_request_url(request: *const lh_request_t) -> *mut lh_url_t {
-    let request = unsafe { &*request };
-    Box::into_raw(Box::new(request.inner.url().clone().into()))
+  let request = unsafe { &*request };
+  Box::into_raw(Box::new(request.inner.url().clone().into()))
 }
 
 /// Get the headers of the request.
@@ -280,8 +301,8 @@ pub extern "C" fn lh_request_url(request: *const lh_request_t) -> *mut lh_url_t 
 /// ```
 #[no_mangle]
 pub extern "C" fn lh_request_headers(request: *const lh_request_t) -> *mut lh_headers_t {
-    let request = unsafe { &*request };
-    Box::into_raw(Box::new(request.inner.headers().clone().into()))
+  let request = unsafe { &*request };
+  Box::into_raw(Box::new(request.inner.headers().clone().into()))
 }
 
 /// Get the body of the request.
@@ -294,8 +315,8 @@ pub extern "C" fn lh_request_headers(request: *const lh_request_t) -> *mut lh_he
 /// ```
 #[no_mangle]
 pub extern "C" fn lh_request_body(request: *const lh_request_t) -> *const ffi::c_char {
-    let request = unsafe { &*request };
-    CString::new(request.inner.body()).unwrap().into_raw()
+  let request = unsafe { &*request };
+  CString::new(request.inner.body()).unwrap().into_raw()
 }
 
 /// Read from the body of the request into a buffer. Consumes that many bytes from the body.
@@ -308,17 +329,21 @@ pub extern "C" fn lh_request_body(request: *const lh_request_t) -> *const ffi::c
 /// size_t length = lh_request_body_read(request, buffer, 1024);
 /// ```
 #[no_mangle]
-pub extern "C" fn lh_request_body_read(request: *const lh_request_t, buffer: *mut ffi::c_char, length: usize) -> usize {
-    let request = unsafe { &*request };
-    let body = request.inner.body();
+pub extern "C" fn lh_request_body_read(
+  request: *const lh_request_t,
+  buffer: *mut ffi::c_char,
+  length: usize,
+) -> usize {
+  let request = unsafe { &*request };
+  let body = request.inner.body();
 
-    let length = length.min(body.len());
-    let chunk = body.take(length);
+  let length = length.min(body.len());
+  let chunk = body.take(length);
 
-    unsafe {
-        std::ptr::copy_nonoverlapping(chunk.chunk().as_ptr() as *mut ffi::c_char, buffer, length);
-    }
-    length
+  unsafe {
+    std::ptr::copy_nonoverlapping(chunk.chunk().as_ptr() as *mut ffi::c_char, buffer, length);
+  }
+  length
 }
 
 /// An HTTP request builder. Includes method, URL, headers, and body.
@@ -330,21 +355,21 @@ pub extern "C" fn lh_request_body_read(request: *const lh_request_t, buffer: *mu
 /// ```
 #[allow(non_camel_case_types)]
 pub struct lh_request_builder_t {
-    inner: RequestBuilder,
+  inner: RequestBuilder,
 }
 
 /// Convert a `RequestBuilder` into a `lh_request_builder_t`.
 impl From<RequestBuilder> for lh_request_builder_t {
-    fn from(inner: RequestBuilder) -> Self {
-        Self { inner }
-    }
+  fn from(inner: RequestBuilder) -> Self {
+    Self { inner }
+  }
 }
 
 /// Convert a `&lh_request_builder_t` into a `RequestBuilder`.
 impl From<&lh_request_builder_t> for RequestBuilder {
-    fn from(builder: &lh_request_builder_t) -> RequestBuilder {
-        builder.inner.clone()
-    }
+  fn from(builder: &lh_request_builder_t) -> RequestBuilder {
+    builder.inner.clone()
+  }
 }
 
 /// Create a new `lh_request_builder_t`.
@@ -356,7 +381,7 @@ impl From<&lh_request_builder_t> for RequestBuilder {
 /// ```
 #[no_mangle]
 pub extern "C" fn lh_request_builder_new() -> *mut lh_request_builder_t {
-    Box::into_raw(Box::new(RequestBuilder::new().into()))
+  Box::into_raw(Box::new(RequestBuilder::new().into()))
 }
 
 /// Free a `lh_request_builder_t`.
@@ -372,11 +397,11 @@ pub extern "C" fn lh_request_builder_new() -> *mut lh_request_builder_t {
 /// ```
 #[no_mangle]
 pub extern "C" fn lh_request_builder_free(builder: *mut lh_request_builder_t) {
-    if !builder.is_null() {
-        unsafe {
-            drop(Box::from_raw(builder));
-        }
+  if !builder.is_null() {
+    unsafe {
+      drop(Box::from_raw(builder));
     }
+  }
 }
 
 /// Create a new `lh_request_builder_t` from an existing `lh_request_t`.
@@ -388,9 +413,11 @@ pub extern "C" fn lh_request_builder_free(builder: *mut lh_request_builder_t) {
 /// lh_request_builder_t* builder = lh_request_builder_extend(request);
 /// ```
 #[no_mangle]
-pub extern "C" fn lh_request_builder_extend(request: *const lh_request_t) -> *mut lh_request_builder_t {
-    let request = unsafe { &*request };
-    Box::into_raw(Box::new(RequestBuilder::extend(&request.inner).into()))
+pub extern "C" fn lh_request_builder_extend(
+  request: *const lh_request_t,
+) -> *mut lh_request_builder_t {
+  let request = unsafe { &*request };
+  Box::into_raw(Box::new(RequestBuilder::extend(&request.inner).into()))
 }
 
 /// Set the method of the request.
@@ -403,12 +430,12 @@ pub extern "C" fn lh_request_builder_extend(request: *const lh_request_t) -> *mu
 /// ```
 #[no_mangle]
 pub extern "C" fn lh_request_builder_method(
-    builder: *mut lh_request_builder_t,
-    method: *const ffi::c_char,
+  builder: *mut lh_request_builder_t,
+  method: *const ffi::c_char,
 ) -> *mut lh_request_builder_t {
-    let method = unsafe { CStr::from_ptr(method).to_string_lossy().into_owned() };
-    let builder = unsafe { &mut *builder };
-    Box::into_raw(Box::new(builder.inner.clone().method(method).into()))
+  let method = unsafe { CStr::from_ptr(method).to_string_lossy().into_owned() };
+  let builder = unsafe { &mut *builder };
+  Box::into_raw(Box::new(builder.inner.clone().method(method).into()))
 }
 
 /// Set the URL of the request.
@@ -421,12 +448,12 @@ pub extern "C" fn lh_request_builder_method(
 /// ```
 #[no_mangle]
 pub extern "C" fn lh_request_builder_url(
-    builder: *mut lh_request_builder_t,
-    url: *const ffi::c_char,
+  builder: *mut lh_request_builder_t,
+  url: *const ffi::c_char,
 ) -> *mut lh_request_builder_t {
-    let url = unsafe { CStr::from_ptr(url).to_string_lossy().into_owned() };
-    let builder = unsafe { &mut *builder };
-    Box::into_raw(Box::new(builder.inner.clone().url(&url).unwrap().into()))
+  let url = unsafe { CStr::from_ptr(url).to_string_lossy().into_owned() };
+  let builder = unsafe { &mut *builder };
+  Box::into_raw(Box::new(builder.inner.clone().url(&url).unwrap().into()))
 }
 
 /// Add a header to the request.
@@ -439,14 +466,14 @@ pub extern "C" fn lh_request_builder_url(
 /// ```
 #[no_mangle]
 pub extern "C" fn lh_request_builder_header(
-    builder: *mut lh_request_builder_t,
-    key: *const ffi::c_char,
-    value: *const ffi::c_char,
+  builder: *mut lh_request_builder_t,
+  key: *const ffi::c_char,
+  value: *const ffi::c_char,
 ) -> *mut lh_request_builder_t {
-    let key = unsafe { CStr::from_ptr(key).to_string_lossy().into_owned() };
-    let value = unsafe { CStr::from_ptr(value).to_string_lossy().into_owned() };
-    let builder = unsafe { &mut *builder };
-    Box::into_raw(Box::new(builder.inner.clone().header(key, value).into()))
+  let key = unsafe { CStr::from_ptr(key).to_string_lossy().into_owned() };
+  let value = unsafe { CStr::from_ptr(value).to_string_lossy().into_owned() };
+  let builder = unsafe { &mut *builder };
+  Box::into_raw(Box::new(builder.inner.clone().header(key, value).into()))
 }
 
 /// Set the body of the request.
@@ -459,12 +486,12 @@ pub extern "C" fn lh_request_builder_header(
 /// ```
 #[no_mangle]
 pub extern "C" fn lh_request_builder_body(
-    builder: *mut lh_request_builder_t,
-    body: *const ffi::c_char,
+  builder: *mut lh_request_builder_t,
+  body: *const ffi::c_char,
 ) -> *mut lh_request_builder_t {
-    let body = unsafe { CStr::from_ptr(body).to_bytes() };
-    let builder = unsafe { &mut *builder };
-    Box::into_raw(Box::new(builder.inner.clone().body(body).into()))
+  let body = unsafe { CStr::from_ptr(body).to_bytes() };
+  let builder = unsafe { &mut *builder };
+  Box::into_raw(Box::new(builder.inner.clone().body(body).into()))
 }
 
 /// Build a `lh_request_t` from a `lh_request_builder_t`.
@@ -479,29 +506,31 @@ pub extern "C" fn lh_request_builder_body(
 /// lh_request_t* request = lh_request_builder_build(builder);
 /// ```
 #[no_mangle]
-pub extern "C" fn lh_request_builder_build(builder: *mut lh_request_builder_t) -> *mut lh_request_t {
-    let builder = unsafe { Box::from_raw(builder) };
-    Box::into_raw(Box::new(builder.inner.build().into()))
+pub extern "C" fn lh_request_builder_build(
+  builder: *mut lh_request_builder_t,
+) -> *mut lh_request_t {
+  let builder = unsafe { Box::from_raw(builder) };
+  Box::into_raw(Box::new(builder.inner.build().into()))
 }
 
 /// An HTTP response. Includes status code, headers, and body.
 #[allow(non_camel_case_types)]
 pub struct lh_response_t {
-    inner: Response,
+  inner: Response,
 }
 
 /// Convert a `Response` into a `lh_response_t`.
 impl From<Response> for lh_response_t {
-    fn from(inner: Response) -> Self {
-        Self { inner }
-    }
+  fn from(inner: Response) -> Self {
+    Self { inner }
+  }
 }
 
 /// Convert a `&lh_response_t` into a `Response`.
 impl From<&lh_response_t> for Response {
-    fn from(response: &lh_response_t) -> Response {
-        response.inner.clone()
-    }
+  fn from(response: &lh_response_t) -> Response {
+    response.inner.clone()
+  }
 }
 
 /// Create a new `lh_response_t`.
@@ -512,10 +541,16 @@ impl From<&lh_response_t> for Response {
 /// lh_response_t* response = lh_response_new(200, headers, "Hello, world!");
 /// ```
 #[no_mangle]
-pub extern "C" fn lh_response_new(status_code: i32, headers: *mut lh_headers_t, body: *const c_char) -> *mut lh_response_t {
-    let body_str = unsafe { CStr::from_ptr(body).to_bytes() };
-    let headers = unsafe { &*headers };
-    Box::into_raw(Box::new(Response::new(status_code, headers.into(), body_str, "", None).into()))
+pub extern "C" fn lh_response_new(
+  status_code: i32,
+  headers: *mut lh_headers_t,
+  body: *const c_char,
+) -> *mut lh_response_t {
+  let body_str = unsafe { CStr::from_ptr(body).to_bytes() };
+  let headers = unsafe { &*headers };
+  Box::into_raw(Box::new(
+    Response::new(status_code, headers.into(), body_str, "", None).into(),
+  ))
 }
 
 /// Free a `lh_response_t`.
@@ -531,11 +566,11 @@ pub extern "C" fn lh_response_new(status_code: i32, headers: *mut lh_headers_t, 
 /// ```
 #[no_mangle]
 pub extern "C" fn lh_response_free(response: *mut lh_response_t) {
-    if !response.is_null() {
-        unsafe {
-            drop(Box::from_raw(response));
-        }
+  if !response.is_null() {
+    unsafe {
+      drop(Box::from_raw(response));
     }
+  }
 }
 
 /// Get the status code of the response.
@@ -548,8 +583,8 @@ pub extern "C" fn lh_response_free(response: *mut lh_response_t) {
 /// ```
 #[no_mangle]
 pub extern "C" fn lh_response_status(response: *const lh_response_t) -> i32 {
-    let response = unsafe { &*response };
-    response.inner.status()
+  let response = unsafe { &*response };
+  response.inner.status()
 }
 
 /// Get the headers of the response.
@@ -562,8 +597,8 @@ pub extern "C" fn lh_response_status(response: *const lh_response_t) -> i32 {
 /// ```
 #[no_mangle]
 pub extern "C" fn lh_response_headers(response: *const lh_response_t) -> *mut lh_headers_t {
-    let response = unsafe { &*response };
-    Box::into_raw(Box::new(response.inner.headers().clone().into()))
+  let response = unsafe { &*response };
+  Box::into_raw(Box::new(response.inner.headers().clone().into()))
 }
 
 /// Get the body of the response.
@@ -576,8 +611,8 @@ pub extern "C" fn lh_response_headers(response: *const lh_response_t) -> *mut lh
 /// ```
 #[no_mangle]
 pub extern "C" fn lh_response_body(response: *const lh_response_t) -> *const c_char {
-    let response = unsafe { &*response };
-    CString::new(response.inner.body()).unwrap().into_raw()
+  let response = unsafe { &*response };
+  CString::new(response.inner.body()).unwrap().into_raw()
 }
 
 /// An HTTP response builder. Includes status, headers, body, log, and exception string.
@@ -589,21 +624,21 @@ pub extern "C" fn lh_response_body(response: *const lh_response_t) -> *const c_c
 /// ```
 #[allow(non_camel_case_types)]
 pub struct lh_response_builder_t {
-    inner: ResponseBuilder,
+  inner: ResponseBuilder,
 }
 
 /// Convert a `ResponseBuilder` into a `lh_response_builder_t`.
 impl From<ResponseBuilder> for lh_response_builder_t {
-    fn from(inner: ResponseBuilder) -> Self {
-        Self { inner }
-    }
+  fn from(inner: ResponseBuilder) -> Self {
+    Self { inner }
+  }
 }
 
 /// Convert a `&lh_response_builder_t` into a `ResponseBuilder`.
 impl From<&lh_response_builder_t> for ResponseBuilder {
-    fn from(builder: &lh_response_builder_t) -> ResponseBuilder {
-        builder.inner.clone()
-    }
+  fn from(builder: &lh_response_builder_t) -> ResponseBuilder {
+    builder.inner.clone()
+  }
 }
 
 /// Create a new `lh_response_builder_t`.
@@ -615,7 +650,7 @@ impl From<&lh_response_builder_t> for ResponseBuilder {
 /// ```
 #[no_mangle]
 pub extern "C" fn lh_response_builder_new() -> *mut lh_response_builder_t {
-    Box::into_raw(Box::new(ResponseBuilder::new().into()))
+  Box::into_raw(Box::new(ResponseBuilder::new().into()))
 }
 
 /// Free a `lh_response_builder_t`.
@@ -631,11 +666,11 @@ pub extern "C" fn lh_response_builder_new() -> *mut lh_response_builder_t {
 /// ```
 #[no_mangle]
 pub extern "C" fn lh_response_builder_free(builder: *mut lh_response_builder_t) {
-    if !builder.is_null() {
-        unsafe {
-            drop(Box::from_raw(builder));
-        }
+  if !builder.is_null() {
+    unsafe {
+      drop(Box::from_raw(builder));
     }
+  }
 }
 
 /// Create a new `lh_response_builder_t` from an existing `lh_response_t`.
@@ -647,9 +682,11 @@ pub extern "C" fn lh_response_builder_free(builder: *mut lh_response_builder_t) 
 /// lh_response_builder_t* builder = lh_response_builder_extend(response);
 /// ```
 #[no_mangle]
-pub extern "C" fn lh_response_builder_extend(response: *const lh_response_t) -> *mut lh_response_builder_t {
-    let response = unsafe { &*response };
-    Box::into_raw(Box::new(ResponseBuilder::extend(&response.inner).into()))
+pub extern "C" fn lh_response_builder_extend(
+  response: *const lh_response_t,
+) -> *mut lh_response_builder_t {
+  let response = unsafe { &*response };
+  Box::into_raw(Box::new(ResponseBuilder::extend(&response.inner).into()))
 }
 
 /// Set the status code of the response.
@@ -661,9 +698,12 @@ pub extern "C" fn lh_response_builder_extend(response: *const lh_response_t) -> 
 /// lh_response_builder_status_code(builder, 200);
 /// ```
 #[no_mangle]
-pub extern "C" fn lh_response_builder_status_code(builder: *mut lh_response_builder_t, status_code: i32) {
-    let builder = unsafe { &mut *builder };
-    builder.inner.status(status_code);
+pub extern "C" fn lh_response_builder_status_code(
+  builder: *mut lh_response_builder_t,
+  status_code: i32,
+) {
+  let builder = unsafe { &mut *builder };
+  builder.inner.status(status_code);
 }
 
 /// Add a header to the response.
@@ -675,11 +715,15 @@ pub extern "C" fn lh_response_builder_status_code(builder: *mut lh_response_buil
 /// lh_response_builder_header(builder, "Content-Type", "text/plain");
 /// ```
 #[no_mangle]
-pub extern "C" fn lh_response_builder_header(builder: *mut lh_response_builder_t, key: *const c_char, value: *const c_char) {
-    let builder = unsafe { &mut *builder };
-    let key_str = unsafe { CStr::from_ptr(key).to_string_lossy().into_owned() };
-    let value_str = unsafe { CStr::from_ptr(value).to_string_lossy().into_owned() };
-    builder.inner.header(key_str, value_str);
+pub extern "C" fn lh_response_builder_header(
+  builder: *mut lh_response_builder_t,
+  key: *const c_char,
+  value: *const c_char,
+) {
+  let builder = unsafe { &mut *builder };
+  let key_str = unsafe { CStr::from_ptr(key).to_string_lossy().into_owned() };
+  let value_str = unsafe { CStr::from_ptr(value).to_string_lossy().into_owned() };
+  builder.inner.header(key_str, value_str);
 }
 
 /// Set the body of the response.
@@ -691,10 +735,13 @@ pub extern "C" fn lh_response_builder_header(builder: *mut lh_response_builder_t
 /// lh_response_builder_body(builder, "Hello, world!");
 /// ```
 #[no_mangle]
-pub extern "C" fn lh_response_builder_body(builder: *mut lh_response_builder_t, body: *const c_char) {
-    let builder = unsafe { &mut *builder };
-    let body_str = unsafe { CStr::from_ptr(body).to_bytes() };
-    builder.inner.body(body_str);
+pub extern "C" fn lh_response_builder_body(
+  builder: *mut lh_response_builder_t,
+  body: *const c_char,
+) {
+  let builder = unsafe { &mut *builder };
+  let body_str = unsafe { CStr::from_ptr(body).to_bytes() };
+  builder.inner.body(body_str);
 }
 
 /// Write to the body of the response.
@@ -706,11 +753,15 @@ pub extern "C" fn lh_response_builder_body(builder: *mut lh_response_builder_t, 
 /// lh_response_builder_body_write(builder, "Hello, world!", 13);
 /// ```
 #[no_mangle]
-pub extern "C" fn lh_response_builder_body_write(builder: *mut lh_response_builder_t, data: *const c_char, len: usize) -> usize {
-    let builder = unsafe { &mut *builder };
-    let data = unsafe { std::slice::from_raw_parts(data as *const u8, len) };
-    builder.inner.body.put(data);
-    return len;
+pub extern "C" fn lh_response_builder_body_write(
+  builder: *mut lh_response_builder_t,
+  data: *const c_char,
+  len: usize,
+) -> usize {
+  let builder = unsafe { &mut *builder };
+  let data = unsafe { std::slice::from_raw_parts(data as *const u8, len) };
+  builder.inner.body.put(data);
+  return len;
 }
 
 /// Write to the log of the response.
@@ -722,12 +773,16 @@ pub extern "C" fn lh_response_builder_body_write(builder: *mut lh_response_build
 /// lh_response_builder_log_write(builder, "Hello, world!", 13);
 /// ```
 #[no_mangle]
-pub extern "C" fn lh_response_builder_log_write(builder: *mut lh_response_builder_t, data: *const c_char, len: usize) -> usize {
-    let builder = unsafe { &mut *builder };
-    let data = unsafe { std::slice::from_raw_parts(data as *const u8, len) };
-    builder.inner.log.put(data);
-    builder.inner.log.put("\n".as_bytes());
-    return len;
+pub extern "C" fn lh_response_builder_log_write(
+  builder: *mut lh_response_builder_t,
+  data: *const c_char,
+  len: usize,
+) -> usize {
+  let builder = unsafe { &mut *builder };
+  let data = unsafe { std::slice::from_raw_parts(data as *const u8, len) };
+  builder.inner.log.put(data);
+  builder.inner.log.put("\n".as_bytes());
+  return len;
 }
 
 /// Set the exception string of the response.
@@ -739,10 +794,13 @@ pub extern "C" fn lh_response_builder_log_write(builder: *mut lh_response_builde
 /// lh_response_builder_exception(builder, "Something went wrong!");
 /// ```
 #[no_mangle]
-pub extern "C" fn lh_response_builder_exception(builder: *mut lh_response_builder_t, exception: *const c_char) {
-    let builder = unsafe { &mut *builder };
-    let exception_str = unsafe { CStr::from_ptr(exception).to_string_lossy().into_owned() };
-    builder.inner.exception(exception_str);
+pub extern "C" fn lh_response_builder_exception(
+  builder: *mut lh_response_builder_t,
+  exception: *const c_char,
+) {
+  let builder = unsafe { &mut *builder };
+  let exception_str = unsafe { CStr::from_ptr(exception).to_string_lossy().into_owned() };
+  builder.inner.exception(exception_str);
 }
 
 /// Build a `lh_response_t` from a `lh_response_builder_t`.
@@ -757,9 +815,11 @@ pub extern "C" fn lh_response_builder_exception(builder: *mut lh_response_builde
 /// lh_response_t* response = lh_response_builder_build(builder);
 /// ```
 #[no_mangle]
-pub extern "C" fn lh_response_builder_build(builder: *const lh_response_builder_t) -> *mut lh_response_t {
-    let builder = unsafe { &*builder };
-    Box::into_raw(Box::new(builder.inner.build().into()))
+pub extern "C" fn lh_response_builder_build(
+  builder: *const lh_response_builder_t,
+) -> *mut lh_response_t {
+  let builder = unsafe { &*builder };
+  Box::into_raw(Box::new(builder.inner.build().into()))
 }
 
 /// An HTTP URL. Includes scheme, host, port, domain, origin, authority, username, password, path, query, fragment, and URI.
@@ -771,21 +831,21 @@ pub extern "C" fn lh_response_builder_build(builder: *const lh_response_builder_
 /// ```
 #[allow(non_camel_case_types)]
 pub struct lh_url_t {
-    inner: Url,
+  inner: Url,
 }
 
 /// Convert a `Url` into a `lh_url_t`.
 impl From<Url> for lh_url_t {
-    fn from(inner: Url) -> Self {
-        Self { inner }
-    }
+  fn from(inner: Url) -> Self {
+    Self { inner }
+  }
 }
 
 /// Convert a `&lh_url_t` into a `Url`.
 impl From<&lh_url_t> for Url {
-    fn from(url: &lh_url_t) -> Url {
-        url.inner.clone()
-    }
+  fn from(url: &lh_url_t) -> Url {
+    url.inner.clone()
+  }
 }
 
 /// Parse a URL into a `lh_url_t`.
@@ -797,9 +857,9 @@ impl From<&lh_url_t> for Url {
 /// ```
 #[no_mangle]
 pub extern "C" fn lh_url_parse(url: *const c_char) -> *mut lh_url_t {
-    let url = unsafe { CStr::from_ptr(url).to_string_lossy().into_owned() };
-    let url = Url::parse(&url).unwrap();
-    Box::into_raw(Box::new(url.into()))
+  let url = unsafe { CStr::from_ptr(url).to_string_lossy().into_owned() };
+  let url = Url::parse(&url).unwrap();
+  Box::into_raw(Box::new(url.into()))
 }
 
 /// Free a `lh_url_t`.
@@ -815,11 +875,11 @@ pub extern "C" fn lh_url_parse(url: *const c_char) -> *mut lh_url_t {
 /// ```
 #[no_mangle]
 pub extern "C" fn lh_url_free(url: *mut lh_url_t) {
-    if !url.is_null() {
-        unsafe {
-            drop(Box::from_raw(url));
-        }
+  if !url.is_null() {
+    unsafe {
+      drop(Box::from_raw(url));
     }
+  }
 }
 
 /// Get the scheme of the URL.
@@ -832,8 +892,8 @@ pub extern "C" fn lh_url_free(url: *mut lh_url_t) {
 /// ```
 #[no_mangle]
 pub extern "C" fn lh_url_scheme(url: *const lh_url_t) -> *const c_char {
-    let url = unsafe { &*url };
-    CString::new(url.inner.scheme()).unwrap().into_raw()
+  let url = unsafe { &*url };
+  CString::new(url.inner.scheme()).unwrap().into_raw()
 }
 
 /// Get the host of the URL.
@@ -846,8 +906,10 @@ pub extern "C" fn lh_url_scheme(url: *const lh_url_t) -> *const c_char {
 /// ```
 #[no_mangle]
 pub extern "C" fn lh_url_host(url: *const lh_url_t) -> *const c_char {
-    let url = unsafe { &*url };
-    CString::new(url.inner.host_str().unwrap_or("")).unwrap().into_raw()
+  let url = unsafe { &*url };
+  CString::new(url.inner.host_str().unwrap_or(""))
+    .unwrap()
+    .into_raw()
 }
 
 /// Get the port of the URL.
@@ -860,8 +922,8 @@ pub extern "C" fn lh_url_host(url: *const lh_url_t) -> *const c_char {
 /// ```
 #[no_mangle]
 pub extern "C" fn lh_url_port(url: *const lh_url_t) -> u16 {
-    let url = unsafe { &*url };
-    url.inner.port().unwrap_or(0)
+  let url = unsafe { &*url };
+  url.inner.port().unwrap_or(0)
 }
 
 /// Get the domain of the URL.
@@ -874,8 +936,10 @@ pub extern "C" fn lh_url_port(url: *const lh_url_t) -> u16 {
 /// ```
 #[no_mangle]
 pub extern "C" fn lh_url_domain(url: *const lh_url_t) -> *const c_char {
-    let url = unsafe { &*url };
-    CString::new(url.inner.domain().unwrap_or("")).unwrap().into_raw()
+  let url = unsafe { &*url };
+  CString::new(url.inner.domain().unwrap_or(""))
+    .unwrap()
+    .into_raw()
 }
 
 /// Get the origin of the URL.
@@ -888,16 +952,16 @@ pub extern "C" fn lh_url_domain(url: *const lh_url_t) -> *const c_char {
 /// ```
 #[no_mangle]
 pub extern "C" fn lh_url_origin(url: *const lh_url_t) -> *const c_char {
-    let url = unsafe { &*url };
-    let origin = match url.inner.origin() {
-        url::Origin::Opaque(_) => {
-            format!("{}://", url.inner.scheme())
-        },
-        url::Origin::Tuple(scheme, host, port) => {
-            format!("{}://{}:{}", scheme, host, port)
-        }
-    };
-    CString::new(origin.as_str()).unwrap().into_raw()
+  let url = unsafe { &*url };
+  let origin = match url.inner.origin() {
+    url::Origin::Opaque(_) => {
+      format!("{}://", url.inner.scheme())
+    }
+    url::Origin::Tuple(scheme, host, port) => {
+      format!("{}://{}:{}", scheme, host, port)
+    }
+  };
+  CString::new(origin.as_str()).unwrap().into_raw()
 }
 
 /// Check if the URL has an authority.
@@ -910,8 +974,8 @@ pub extern "C" fn lh_url_origin(url: *const lh_url_t) -> *const c_char {
 /// ```
 #[no_mangle]
 pub extern "C" fn lh_url_has_authority(url: *const lh_url_t) -> bool {
-    let url = unsafe { &*url };
-    url.inner.has_authority()
+  let url = unsafe { &*url };
+  url.inner.has_authority()
 }
 
 /// Get the authority of the URL.
@@ -924,8 +988,8 @@ pub extern "C" fn lh_url_has_authority(url: *const lh_url_t) -> bool {
 /// ```
 #[no_mangle]
 pub extern "C" fn lh_url_authority(url: *const lh_url_t) -> *const c_char {
-    let url = unsafe { &*url };
-    CString::new(url.inner.authority()).unwrap().into_raw()
+  let url = unsafe { &*url };
+  CString::new(url.inner.authority()).unwrap().into_raw()
 }
 
 /// Get the username of the URL.
@@ -938,8 +1002,8 @@ pub extern "C" fn lh_url_authority(url: *const lh_url_t) -> *const c_char {
 /// ```
 #[no_mangle]
 pub extern "C" fn lh_url_username(url: *const lh_url_t) -> *const c_char {
-    let url = unsafe { &*url };
-    CString::new(url.inner.username()).unwrap().into_raw()
+  let url = unsafe { &*url };
+  CString::new(url.inner.username()).unwrap().into_raw()
 }
 
 /// Get the password of the URL.
@@ -952,8 +1016,10 @@ pub extern "C" fn lh_url_username(url: *const lh_url_t) -> *const c_char {
 /// ```
 #[no_mangle]
 pub extern "C" fn lh_url_password(url: *const lh_url_t) -> *const c_char {
-    let url = unsafe { &*url };
-    CString::new(url.inner.password().unwrap_or("")).unwrap().into_raw()
+  let url = unsafe { &*url };
+  CString::new(url.inner.password().unwrap_or(""))
+    .unwrap()
+    .into_raw()
 }
 
 /// Get the path of the URL.
@@ -966,8 +1032,8 @@ pub extern "C" fn lh_url_password(url: *const lh_url_t) -> *const c_char {
 /// ```
 #[no_mangle]
 pub extern "C" fn lh_url_path(url: *const lh_url_t) -> *const c_char {
-    let url = unsafe { &*url };
-    CString::new(url.inner.path()).unwrap().into_raw()
+  let url = unsafe { &*url };
+  CString::new(url.inner.path()).unwrap().into_raw()
 }
 
 /// Get the query of the URL.
@@ -980,8 +1046,10 @@ pub extern "C" fn lh_url_path(url: *const lh_url_t) -> *const c_char {
 /// ```
 #[no_mangle]
 pub extern "C" fn lh_url_query(url: *const lh_url_t) -> *const c_char {
-    let url = unsafe { &*url };
-    CString::new(url.inner.query().unwrap_or("")).unwrap().into_raw()
+  let url = unsafe { &*url };
+  CString::new(url.inner.query().unwrap_or(""))
+    .unwrap()
+    .into_raw()
 }
 
 /// Get the fragment of the URL.
@@ -994,8 +1062,10 @@ pub extern "C" fn lh_url_query(url: *const lh_url_t) -> *const c_char {
 /// ```
 #[no_mangle]
 pub extern "C" fn lh_url_fragment(url: *const lh_url_t) -> *const c_char {
-    let url = unsafe { &*url };
-    CString::new(url.inner.fragment().unwrap_or("")).unwrap().into_raw()
+  let url = unsafe { &*url };
+  CString::new(url.inner.fragment().unwrap_or(""))
+    .unwrap()
+    .into_raw()
 }
 
 /// Get the URI of the URL.
@@ -1008,6 +1078,6 @@ pub extern "C" fn lh_url_fragment(url: *const lh_url_t) -> *const c_char {
 /// ```
 #[no_mangle]
 pub extern "C" fn lh_url_uri(url: *const lh_url_t) -> *const c_char {
-    let url = unsafe { &*url };
-    CString::new(url.inner.as_str()).unwrap().into_raw()
+  let url = unsafe { &*url };
+  CString::new(url.inner.as_str()).unwrap().into_raw()
 }
