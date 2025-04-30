@@ -114,11 +114,12 @@ impl PhpRuntime {
   /// ```
   #[napi]
   pub fn handle_request_sync(&self, request: &PhpRequest) -> Result<PhpResponse> {
-    self
-      .embed
-      .handle(request.into())
-      .map_err(|err| Error::from_reason(err.to_string()))
-      .map(PhpResponse::new)
+    let mut task = PhpRequestTask {
+      embed: self.embed.clone(),
+      request: request.into(),
+    };
+
+    task.compute().map(PhpResponse::new)
   }
 }
 
