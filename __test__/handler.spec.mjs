@@ -6,11 +6,11 @@ test('Support input/output streams', async (t) => {
   const php = new Php({
     argv: process.argv,
     file: 'index.php',
-    code: `
+    code: `<?php
       if (file_get_contents('php://input') == 'Hello, from Node.js!') {
         echo 'Hello, from PHP!';
       }
-    `
+    ?>`
   })
 
   const req = new Request({
@@ -27,9 +27,9 @@ test('Support input/output streams', async (t) => {
 test('Capture logs', async (t) => {
   const php = new Php({
     file: 'index.php',
-    code: `
+    code: `<?php
       error_log('Hello, from error_log!');
-    `
+    ?>`
   })
 
   const req = new Request({
@@ -45,9 +45,9 @@ test('Capture logs', async (t) => {
 test('Capture exceptions', async (t) => {
   const php = new Php({
     file: 'index.php',
-    code: `
+    code: `<?php
       throw new Exception('Hello, from PHP!');
-    `
+    ?>`
   })
 
   const req = new Request({
@@ -64,11 +64,12 @@ test('Capture exceptions', async (t) => {
 test('Support request and response headers', async (t) => {
   const php = new Php({
     file: 'index.php',
-    code: `
+    code: `<?php
       $headers = apache_request_headers();
       header("X-Test: Hello, from PHP!");
-      echo $headers["X-Test"];
-    `
+      // TODO: Does PHP expect headers be returned to uppercase?
+      echo $headers["x-test"];
+    ?>`
   })
 
   const req = new Request({

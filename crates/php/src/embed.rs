@@ -1,9 +1,5 @@
 use std::{
-  collections::HashMap,
-  env::Args,
-  ffi::{c_char, c_int, c_void, CStr, CString, NulError},
-  ops::Deref,
-  sync::{OnceLock, RwLock},
+  collections::HashMap, env::Args, ffi::{c_char, c_int, c_void, CStr, CString, NulError}, ops::Deref, path::PathBuf, sync::{OnceLock, RwLock}
 };
 
 use bytes::{Buf, BufMut};
@@ -12,10 +8,11 @@ use ext_php_rs::{
   builders::{IniBuilder, SapiBuilder},
   embed::{ext_php_rs_sapi_shutdown, ext_php_rs_sapi_startup, SapiModule},
   error::Error,
+  exception::register_error_observer,
   ffi::{
     php_execute_script, php_module_shutdown, php_module_startup, php_register_variable,
     php_request_shutdown, php_request_startup, sapi_header_struct, sapi_shutdown, sapi_startup,
-    zend_eval_string_ex, zend_stream_init_filename, ZEND_RESULT_CODE_SUCCESS,
+    zend_eval_string_ex, zend_stream_init_filename, ZEND_RESULT_CODE_SUCCESS
   },
   prelude::*,
   types::{ZendHashTable, ZendStr},
@@ -115,6 +112,18 @@ impl Sapi {
       php_module_startup(boxed.as_mut(), get_module());
     }
 
+    // TODO: Should maybe capture this to store in EmbedException rather than
+    // writing to the ResponseBuilder here. When php_execute_script fails it
+    // should read that and could return an error or write it to the
+    // ResponseBuilder there.
+    register_error_observer(|_error_type, _file, _line, message| {
+      RequestContext::current().map(|ctx| {
+        let message_str = message.as_str()
+          .expect("Failed to convert message to string");
+        ctx.response_builder().exception(message_str);
+      });
+    });
+
     Sapi(boxed)
   }
 
@@ -164,6 +173,7 @@ pub enum EmbedException {
   Exception(String),
   Bailout,
   ResponseError,
+  IoError(std::io::Error)
 }
 
 impl std::fmt::Display for EmbedException {
@@ -177,6 +187,7 @@ impl std::fmt::Display for EmbedException {
       EmbedException::Exception(e) => write!(f, "Exception thrown: {}", e),
       EmbedException::Bailout => write!(f, "PHP bailout"),
       EmbedException::ResponseError => write!(f, "Error building response"),
+      EmbedException::IoError(e) => write!(f, "IO error: {}", e),
     }
   }
 }
@@ -298,20 +309,16 @@ impl Handler for Embed {
 
     // Get code and filename to execute
     let code = cstr(self.code.clone())?;
-    let cwd = std::env::current_dir()
-      .unwrap_or(std::path::PathBuf::from("/"))
-      .canonicalize()
-      .unwrap();
+    let cwd = maybe_current_dir()?;
     let script_name = default_cstr(
       "<unnamed>",
       self.filename.clone().map(|v| {
         cwd
           .join(v)
           .canonicalize()
-          .unwrap()
-          .to_str()
-          .unwrap()
-          .to_owned()
+          .unwrap_or(cwd)
+          .display()
+          .to_string()
       }),
     )?;
 
@@ -403,7 +410,9 @@ impl Handler for Embed {
 
         // Run script in its own try/catch so bailout doesn't skip request shutdown.
         try_catch(|| {
-          unsafe { php_execute_script(&mut file_handle) };
+          if !unsafe { php_execute_script(&mut file_handle) } {
+            // return Err(EmbedException::ExecuteError);
+          }
 
           // if unsafe {
           //     zend_eval_string_ex(code, std::ptr::null_mut(), filename, false)
@@ -425,12 +434,13 @@ impl Handler for Embed {
 
             // TODO: Should exceptions be raised or only captured on
             // the response builder?
-            // return Err(EmbedException::Exception(ex.to_string()));
+            return Err(EmbedException::Exception(ex.to_string()));
           }
 
           Ok(())
         })
         .map_or_else(|_err| Err(EmbedException::Bailout), |res| res)?;
+        // .map_err(|_| EmbedException::Bailout)?;
 
         {
           let (mimetype, http_response_code) = {
@@ -852,4 +862,11 @@ fn drop_str(ptr: *const i8) {
     return;
   }
   drop(reclaim_str(ptr));
+}
+
+fn maybe_current_dir() -> Result<PathBuf, EmbedException> {
+  std::env::current_dir()
+    .unwrap_or(std::path::PathBuf::from("/"))
+    .canonicalize()
+    .map_err(EmbedException::IoError)
 }

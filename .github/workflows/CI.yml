@@ -166,8 +166,16 @@ jobs:
           make -j$([[ "$(uname)" == "Darwin" ]] && sysctl -n hw.physicalcpu || nproc)
           sudo make install
 
+          EXT=$([[ "$(uname)" == "Darwin" ]] && echo "dylib" || echo "so")
+          mkdir -p ../libs/${{ matrix.settings.target }}
+          mv libs/libphp.$EXT ../libs/${{ matrix.settings.target }}/libphp.$EXT
+
           # Copy libs to be accessible by napi.rs build
           cp libs/* ..
+
+          cd ..
+
+          ${{ matrix.settings.build }}
       - name: Build in docker
         uses: addnab/docker-run-action@v3
         if: ${{ matrix.settings.docker }}
@@ -198,20 +206,22 @@ jobs:
             npm i -g pnpm
 
             ${{ matrix.settings.build }}
-      - name: Build
-        run: ${{ matrix.settings.build }}
-        if: ${{ !matrix.settings.docker }}
-        shell: bash
       # - name: Fix rpath to libphp dynamic library
       #   shell: bash
       #   run: |
       #     EXT=$([[ "$(uname)" == "Darwin" ]] && echo "dylib" || echo "so")
       #     install_name_tool -change @rpath/libphp.$EXT @loader_path/libphp.$EXT ${{ env.APP_NAME }}.*.node
-      - name: Upload artifact
+      - name: Upload *.node artifact
         uses: actions/upload-artifact@v4
         with:
           name: bindings-${{ matrix.settings.target }}
           path: ${{ env.APP_NAME }}.*.node
+          if-no-files-found: error
+      - name: Upload libphp artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libphp-${{ matrix.settings.target }}
+          path: php-src/lib/*
           if-no-files-found: error
 
   test-macOS-windows-binding:
@@ -249,10 +259,15 @@ jobs:
           architecture: ${{ matrix.settings.architecture }}
       - name: Install dependencies
         run: pnpm install
-      - name: Download artifacts
+      - name: Download *.node artifacts
         uses: actions/download-artifact@v4
         with:
           name: bindings-${{ matrix.settings.target }}
+          path: .
+      - name: Download libphp artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: libphp-${{ matrix.settings.target }}
           path: .
       - name: List packages
         run: ls -R .
@@ -369,8 +384,7 @@ jobs:
   #     - lint
   #     - test-linux-binding
   #     - test-macOS-windows-binding
-  #     # TODO: Enable this if/when x86_64 builds are enabled
-  #     # - universal-macOS
+  #     - universal-macOS
   #   steps:
   #     - uses: actions/checkout@v4
   #     - name: setup pnpm
