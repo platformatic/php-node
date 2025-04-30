@@ -1,5 +1,10 @@
 use std::{
-  collections::HashMap, env::Args, ffi::{c_char, c_int, c_void, CStr, CString, NulError}, ops::Deref, path::PathBuf, sync::{OnceLock, RwLock}
+  collections::HashMap,
+  env::Args,
+  ffi::{c_char, c_int, c_void, CStr, CString, NulError},
+  ops::Deref,
+  path::PathBuf,
+  sync::{OnceLock, RwLock},
 };
 
 use bytes::{Buf, BufMut};
@@ -12,7 +17,7 @@ use ext_php_rs::{
   ffi::{
     php_execute_script, php_module_shutdown, php_module_startup, php_register_variable,
     php_request_shutdown, php_request_startup, sapi_header_struct, sapi_shutdown, sapi_startup,
-    zend_eval_string_ex, zend_stream_init_filename, ZEND_RESULT_CODE_SUCCESS
+    zend_eval_string_ex, zend_stream_init_filename, ZEND_RESULT_CODE_SUCCESS,
   },
   prelude::*,
   types::{ZendHashTable, ZendStr},
@@ -118,7 +123,8 @@ impl Sapi {
     // ResponseBuilder there.
     register_error_observer(|_error_type, _file, _line, message| {
       RequestContext::current().map(|ctx| {
-        let message_str = message.as_str()
+        let message_str = message
+          .as_str()
           .expect("Failed to convert message to string");
         ctx.response_builder().exception(message_str);
       });
@@ -173,7 +179,7 @@ pub enum EmbedException {
   Exception(String),
   Bailout,
   ResponseError,
-  IoError(std::io::Error)
+  IoError(std::io::Error),
 }
 
 impl std::fmt::Display for EmbedException {

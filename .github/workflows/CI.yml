@@ -57,15 +57,17 @@ jobs:
           # Linux
           #
 
-          - host: ubuntu-latest
+          - host: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             # docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian
-            build: pnpm build --target x86_64-unknown-linux-gnu
+            docker: node:22-slim
+            # build: pnpm build --target x86_64-unknown-linux-gnu
+            build: pnpm build
             setup: |
               sudo apt-get update
               sudo apt-get install -y libssl-dev pkg-config build-essential \
                 libcurl4-openssl-dev autoconf libxml2-dev libsqlite3-dev \
-                bison re2c libonig-dev
+                bison re2c libonig-dev patchelf
 
           # TODO: Can't use the musl container, need to build with ssh-agent access.
           # TODO: Fails because missing x86_64-linux-musl-gcc
@@ -107,7 +109,6 @@ jobs:
           version: 10
       - name: Setup node
         uses: actions/setup-node@v4
-        if: ${{ !matrix.settings.docker }}
         with:
           node-version: 22
           cache: pnpm
@@ -132,10 +133,6 @@ jobs:
         if: ${{ matrix.settings.target == 'armv7-unknown-linux-gnueabihf' || matrix.settings.target == 'armv7-unknown-linux-musleabihf' }}
         with:
           version: 0.13.0
-      - name: Setup toolchain
-        run: ${{ matrix.settings.setup }}
-        if: ${{ (matrix.settings.setup) && (!matrix.settings.docker) }}
-        shell: bash
       - name: Checkout php-src
         uses: actions/checkout@v4
         with:
@@ -154,6 +151,8 @@ jobs:
         if: ${{ !matrix.settings.docker }}
         shell: bash
         run: |
+          ${{ matrix.settings.setup }}
+
           # Use brew bison and libiconv manually. Force linking does not work on macOS 13
           if [[ "$(uname)" == "Darwin" ]]; then
             export PATH="$(brew --prefix bison)/bin:$(brew --prefix libiconv)/bin:$PATH"
@@ -165,14 +164,6 @@ jobs:
           ./configure --enable-shared --enable-embed=shared --enable-zts --without-iconv --with-pdo-mysql=mysqlnd --with-mysqli=mysqlnd --with-openssl --with-curl --enable-mbstring
           make -j$([[ "$(uname)" == "Darwin" ]] && sysctl -n hw.physicalcpu || nproc)
           sudo make install
-
-          EXT=$([[ "$(uname)" == "Darwin" ]] && echo "dylib" || echo "so")
-          mkdir -p ../libs/${{ matrix.settings.target }}
-          mv libs/libphp.$EXT ../libs/${{ matrix.settings.target }}/libphp.$EXT
-
-          # Copy libs to be accessible by napi.rs build
-          cp libs/* ..
-
           cd ..
 
           ${{ matrix.settings.build }}
@@ -184,44 +175,83 @@ jobs:
         with:
           image: ${{ matrix.settings.docker }}
           options: '--user 0:0 -v ${{ github.workspace }}/.cargo-cache/git/db:/usr/local/cargo/git/db -v ${{ github.workspace }}/.cargo/registry/cache:/usr/local/cargo/registry/cache -v ${{ github.workspace }}/.cargo/registry/index:/usr/local/cargo/registry/index -v ${{ github.workspace }}:/build -w /build'
+          shell: bash
           run: |
-            ${{ matrix.settings.setup }}
+            # Can't use the setup script because docker lacks sudo
+            apt-get update
+            apt-get install -y curl libssl-dev pkg-config build-essential \
+              libcurl4-openssl-dev autoconf libxml2-dev libsqlite3-dev \
+              bison re2c libonig-dev patchelf zlib1g-dev openssh-client git \
+              libclang-dev
+
+            # Install rust toolchain
+            curl https://sh.rustup.rs -sSf | bash -s -- -y -t ${{ matrix.settings.target }}
+            source "$HOME/.cargo/env"
+
+            # Install pnpm
+            corepack disable
+            npm i -g pnpm
+
+            # Set up SSH key (to checkout ext-php-rs with cargo)
+            mkdir -p ~/.ssh
+            eval `ssh-agent -s`
+            echo "${{ secrets.SECRET_REPO_DEPLOY_KEY }}" | tr -d '\r' | ssh-add -
+            ssh-add -l
+            mkdir -p ~/.ssh
+            touch ~/.ssh/config
+            touch ~/.ssh/known_hosts
+            chmod -R 400 ~/.ssh
+            ssh-keyscan -t rsa github.com >> ~/.ssh/known_hosts
 
             # Build PHP
             cd php-src
             ./buildconf
             ./configure --enable-shared --enable-embed=shared --enable-zts --without-iconv --with-pdo-mysql=mysqlnd --with-mysqli=mysqlnd --with-openssl --with-curl --enable-mbstring
             make -j$([[ "$(uname)" == "Darwin" ]] && sysctl -n hw.physicalcpu || nproc)
-            sudo make install
-
-            # Copy libs to be accessible by napi.rs build
-            cp libs/* ..
-
+            make install
             cd ..
 
-            mkdir -p ~/.ssh
-            echo "$ID_RSA" >> ~/.ssh/id_rsa
-
-            corepack disable
-            npm i -g pnpm
-
+            export CARGO_NET_GIT_FETCH_WITH_CLI=true
             ${{ matrix.settings.build }}
-      # - name: Fix rpath to libphp dynamic library
-      #   shell: bash
-      #   run: |
-      #     EXT=$([[ "$(uname)" == "Darwin" ]] && echo "dylib" || echo "so")
-      #     install_name_tool -change @rpath/libphp.$EXT @loader_path/libphp.$EXT ${{ env.APP_NAME }}.*.node
-      - name: Upload *.node artifact
+      - name: Fix rpath and copy libphp
+        id: fix-rpath
+        shell: bash
+        run: |
+          EXT=$([[ "$(uname)" == "Darwin" ]] && echo "dylib" || echo "so")
+
+          # Find the .node file in the current directory
+          NODE_FILE=$(ls *.node)
+          echo "Found *.node files: $NODE_FILE"
+
+          if [[ -z "$NODE_FILE" ]]; then
+            echo "No .node file found!"
+            exit 1
+          fi
+
+          # Extract platform and architecture from the .node file name
+          PLATFORM_ARCH=$(echo "$NODE_FILE" | sed -E 's/php\.(.+)\.node/\1/')
+          echo "PLATFORM_ARCH=$PLATFORM_ARCH"
+
+          # Modify rpath and copy libphp
+          if [[ "$(uname)" == "Darwin" ]]; then
+            install_name_tool -change @rpath/libphp.$EXT @loader_path/libphp.$EXT "$NODE_FILE"
+          else
+            sudo patchelf --set-rpath '$ORIGIN' "$NODE_FILE"
+          fi
+
+          # Create target directory and copy files
+          mkdir -p npm/$PLATFORM_ARCH/
+          cp php-src/libs/libphp.$EXT npm/$PLATFORM_ARCH/libphp.$EXT
+          cp "$NODE_FILE" npm/$PLATFORM_ARCH/binding.node
+          echo "PLATFORM_ARCH=$PLATFORM_ARCH" >> $GITHUB_OUTPUT
+      - name: List packages
+        run: ls -R ./npm
+        shell: bash
+      - name: Upload target-specific package for ${{ matrix.settings.target }}
         uses: actions/upload-artifact@v4
         with:
-          name: bindings-${{ matrix.settings.target }}
-          path: ${{ env.APP_NAME }}.*.node
-          if-no-files-found: error
-      - name: Upload libphp artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: libphp-${{ matrix.settings.target }}
-          path: php-src/lib/*
+          name: package-${{ matrix.settings.target }}
+          path: npm
           if-no-files-found: error
 
   test-macOS-windows-binding:
@@ -232,12 +262,16 @@ jobs:
       fail-fast: false
       matrix:
         settings:
-          - host: macos-latest
+          - host: macos-13
             target: x86_64-apple-darwin
             architecture: x64
-          - host: macos-latest
+            setup: |
+              brew install openssl@3
+          - host: macos-15
             target: aarch64-apple-darwin
             architecture: arm64
+            setup: |
+              brew install openssl@3
           # - host: windows-latest
           #   target: x86_64-pc-windows-msvc
           #   architecture: x64
@@ -257,20 +291,20 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: pnpm
           architecture: ${{ matrix.settings.architecture }}
+      - name: Install system packages
+        if: ${{ matrix.settings.setup }}
+        run: ${{ matrix.settings.setup }}
+        shell: bash
       - name: Install dependencies
         run: pnpm install
-      - name: Download *.node artifacts
+      - name: Download target-specific package for ${{ matrix.settings.target }}
         uses: actions/download-artifact@v4
         with:
-          name: bindings-${{ matrix.settings.target }}
-          path: .
-      - name: Download libphp artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: libphp-${{ matrix.settings.target }}
-          path: .
+          name: package-${{ matrix.settings.target }}
+          merge-multiple: true
+          path: npm
       - name: List packages
-        run: ls -R .
+        run: ls -R ./npm
         shell: bash
       - name: Test bindings
         run: pnpm test
@@ -291,7 +325,7 @@ jobs:
         node:
           - '20'
           - '22'
-    runs-on: ${{ contains(matrix.target, 'aarch64') && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    runs-on: ${{ contains(matrix.target, 'aarch64') && 'ubuntu-22.04-arm' || 'ubuntu-22.04' }}
     steps:
       - uses: actions/checkout@v4
       - name: setup pnpm
@@ -325,57 +359,64 @@ jobs:
           echo "PNPM_STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_OUTPUT
       - name: Install dependencies
         run: pnpm install --force
-      - name: Download artifacts
+      - name: Download target-specific package for ${{ matrix.target }}
         uses: actions/download-artifact@v4
         with:
-          name: bindings-${{ matrix.target }}
-          path: .
+          name: package-${{ matrix.target }}
+          merge-multiple: true
+          path: npm
       - name: List packages
-        run: ls -R .
+        run: ls -R ./npm
         shell: bash
       - name: Test bindings
         uses: addnab/docker-run-action@v3
         with:
           image: ${{ steps.docker.outputs.IMAGE }}
           options: -v ${{ steps.docker.outputs.PNPM_STORE_PATH }}:${{ steps.docker.outputs.PNPM_STORE_PATH }} -v ${{ github.workspace }}:${{ github.workspace }} -w ${{ github.workspace }} --platform ${{ steps.docker.outputs.PLATFORM }}
-          run: npm run test
+          run: |
+            apt-get update
+            apt-get install -y libssl-dev pkg-config build-essential \
+              libcurl4-openssl-dev autoconf libxml2-dev libsqlite3-dev \
+              bison re2c libonig-dev
 
-  universal-macOS:
-    name: Build universal macOS binary
-    needs:
-      - build
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10
-      - name: Setup node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
-      - name: Install dependencies
-        run: pnpm install
-      - name: Download macOS x64 artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: bindings-x86_64-apple-darwin
-          path: artifacts
-      - name: Download macOS arm64 artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: bindings-aarch64-apple-darwin
-          path: artifacts
-      - name: Combine binaries
-        run: pnpm universal
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: bindings-universal-apple-darwin
-          path: ${{ env.APP_NAME }}.*.node
-          if-no-files-found: error
+            npm run test
+
+  # universal-macOS:
+  #   name: Build universal macOS binary
+  #   needs:
+  #     - build
+  #   runs-on: macos-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - name: setup pnpm
+  #       uses: pnpm/action-setup@v4
+  #       with:
+  #         version: 10
+  #     - name: Setup node
+  #       uses: actions/setup-node@v4
+  #       with:
+  #         node-version: 20
+  #         cache: pnpm
+  #     - name: Install dependencies
+  #       run: pnpm install
+  #     - name: Download macOS x64 artifact
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: bindings-x86_64-apple-darwin
+  #         path: artifacts
+  #     - name: Download macOS arm64 artifact
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: bindings-aarch64-apple-darwin
+  #         path: artifacts
+  #     - name: Combine binaries
+  #       run: pnpm universal
+  #     - name: Upload artifact
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: bindings-universal-apple-darwin
+  #         path: ${{ env.APP_NAME }}.*.node
+  #         if-no-files-found: error
 
   # publish:
   #   name: Publish
@@ -384,7 +425,7 @@ jobs:
   #     - lint
   #     - test-linux-binding
   #     - test-macOS-windows-binding
-  #     - universal-macOS
+  #     # - universal-macOS
   #   steps:
   #     - uses: actions/checkout@v4
   #     - name: setup pnpm
