@@ -250,8 +250,8 @@ jobs:
       - name: Upload target-specific package for ${{ matrix.settings.target }}
         uses: actions/upload-artifact@v4
         with:
-          name: package-${{ matrix.settings.target }}
-          path: npm
+          name: ${{ steps.fix-rpath.outputs.PLATFORM_ARCH }}
+          path: npm/${{ steps.fix-rpath.outputs.PLATFORM_ARCH }}
           if-no-files-found: error
 
   test-macOS-windows-binding:
@@ -297,12 +297,18 @@ jobs:
         shell: bash
       - name: Install dependencies
         run: pnpm install
+      - name: Determine name of Node.js bindings target
+        id: node-target
+        shell: bash
+        run: |
+          OS="${{ contains(matrix.settings.target, 'darwin') && 'darwin' || 'win32' }}"
+          ARCH="${{ matrix.settings.architecture }}"
+          echo "TARGET=$OS-$ARCH" >> $GITHUB_OUTPUT
       - name: Download target-specific package for ${{ matrix.settings.target }}
         uses: actions/download-artifact@v4
         with:
-          name: package-${{ matrix.settings.target }}
-          merge-multiple: true
-          path: npm
+          name: ${{ steps.node-target.outputs.TARGET }}
+          path: npm/${{ steps.node-target.outputs.TARGET }}
       - name: List packages
         run: ls -R ./npm
         shell: bash
@@ -359,12 +365,18 @@ jobs:
           echo "PNPM_STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_OUTPUT
       - name: Install dependencies
         run: pnpm install --force
+      - name: Determine name of Node.js bindings target
+        id: node-target
+        shell: bash
+        run: |
+          ARCH="${{ contains(matrix.target, 'x86_64') && 'x64' || 'arm64' }}"
+          LIBC="${{ contains(matrix.target, 'gnu') && 'gnu' || 'musl' }}"
+          echo "TARGET=linux-$ARCH-$LIBC" >> $GITHUB_OUTPUT
       - name: Download target-specific package for ${{ matrix.target }}
         uses: actions/download-artifact@v4
         with:
-          name: package-${{ matrix.target }}
-          merge-multiple: true
-          path: npm
+          name: ${{ steps.node-target.outputs.TARGET }}
+          path: npm/${{ steps.node-target.outputs.TARGET }}
       - name: List packages
         run: ls -R ./npm
         shell: bash
@@ -381,89 +393,62 @@ jobs:
 
             npm run test
 
-  # universal-macOS:
-  #   name: Build universal macOS binary
-  #   needs:
-  #     - build
-  #   runs-on: macos-latest
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - name: setup pnpm
-  #       uses: pnpm/action-setup@v4
-  #       with:
-  #         version: 10
-  #     - name: Setup node
-  #       uses: actions/setup-node@v4
-  #       with:
-  #         node-version: 20
-  #         cache: pnpm
-  #     - name: Install dependencies
-  #       run: pnpm install
-  #     - name: Download macOS x64 artifact
-  #       uses: actions/download-artifact@v4
-  #       with:
-  #         name: bindings-x86_64-apple-darwin
-  #         path: artifacts
-  #     - name: Download macOS arm64 artifact
-  #       uses: actions/download-artifact@v4
-  #       with:
-  #         name: bindings-aarch64-apple-darwin
-  #         path: artifacts
-  #     - name: Combine binaries
-  #       run: pnpm universal
-  #     - name: Upload artifact
-  #       uses: actions/upload-artifact@v4
-  #       with:
-  #         name: bindings-universal-apple-darwin
-  #         path: ${{ env.APP_NAME }}.*.node
-  #         if-no-files-found: error
+  publish:
+    name: Publish a release
+    environment: release
+    runs-on: ubuntu-latest
+    if: ${{ (github.head_ref || github.ref_name) == 'main' }}
+    needs:
+      - test-linux-binding
+      - test-macOS-windows-binding
+    steps:
+      - uses: actions/checkout@v4
+      - name: setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install
+      # - name: Clear npm directory
+      #   shell: bash
+      #   run: rm -rf npm/*
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: npm/
+      - name: List packages
+        run: ls -R ./npm
+        shell: bash
+      - name: Publish Dev
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          npm publish --provenance --tag dev
 
-  # publish:
-  #   name: Publish
-  #   runs-on: ubuntu-latest
-  #   needs:
-  #     - lint
-  #     - test-linux-binding
-  #     - test-macOS-windows-binding
-  #     # - universal-macOS
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - name: setup pnpm
-  #       uses: pnpm/action-setup@v4
-  #       with:
-  #         version: 10
-  #     - name: Setup node
-  #       uses: actions/setup-node@v4
-  #       with:
-  #         node-version: 22
-  #         cache: pnpm
-  #     - name: Install dependencies
-  #       run: pnpm install
-  #     - name: Download all artifacts
-  #       uses: actions/download-artifact@v4
-  #       with:
-  #         path: artifacts
-  #     - name: create npm dirs
-  #       run: pnpm napi create-npm-dirs
-  #     - name: Move artifacts
-  #       run: pnpm artifacts
-  #     - name: List packages
-  #       run: ls -R ./npm
-  #       shell: bash
-  #     - name: Publish
-  #       run: |
-  #         npm config set provenance true
-  #         if git log -1 --pretty=%B | grep "^[0-9]\+\.[0-9]\+\.[0-9]\+$";
-  #         then
-  #           echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc
-  #           npm publish --access public
-  #         elif git log -1 --pretty=%B | grep "^[0-9]\+\.[0-9]\+\.[0-9]\+";
-  #         then
-  #           echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc
-  #           npm publish --tag next --access public
-  #         else
-  #           echo "Not a release, skipping publish"
-  #         fi
-  #       env:
-  #         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  #         NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # TODO: Maybe restrict by branch, not just commit format?
+      # TODO: Enable this when we're ready to go public.
+      # - name: Publish
+      #   run: |
+      #     npm config set provenance true
+      #     if git log -1 --pretty=%B | grep "^[0-9]\+\.[0-9]\+\.[0-9]\+$";
+      #     then
+      #       echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc
+      #       npm publish # --access public
+      #     elif git log -1 --pretty=%B | grep "^[0-9]\+\.[0-9]\+\.[0-9]\+";
+      #     then
+      #       echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc
+      #       npm publish --tag next # --access public
+      #     else
+      #       echo "Not a release, skipping publish"
+      #     fi
+      #   env:
+      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      #     NPM_TOKEN: ${{ secrets.NPM_TOKEN }}

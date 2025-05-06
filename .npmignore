@@ -1,10 +1,14 @@
 target
+Cargo.toml
 Cargo.lock
 .cargo
 .github
-npm
+crates
+demo
+.clangd
 .eslintrc
 .prettierignore
+compile_flags.txt
 rustfmt.toml
 pnpm-lock.yaml
 *.node
