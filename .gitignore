@@ -200,3 +200,8 @@ Cargo.lock
 crates/php/buildroot
 crates/php/downloads
 crates/php/source
+
+buildroot
+downloads
+source
+spc

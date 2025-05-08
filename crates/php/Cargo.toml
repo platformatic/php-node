@@ -11,6 +11,14 @@ path = "src/lib.rs"
 name = "php-main"
 path = "src/main.rs"
 
+[dependencies]
+bytes = "1.10.1"
+lang_handler = { path = "../lang_handler", features = ["c"] }
+libc = "0.2.171"
+once_cell = "1.21.0"
+ext-php-rs = { git = "ssh://git@github.com/platformatic/ext-php-rs.git" }
+# ext-php-rs = { path = "../../../ext-php-rs" }
+
 [build-dependencies]
 autotools = "0.2"
 bindgen = "0.69.4"

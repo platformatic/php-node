@@ -1,6 +1,6 @@
 {
   "name": "@platformatic/php",
-  "version": "0.0.0",
+  "version": "0.1.0-dev1",
   "main": "index.js",
   "types": "index.d.ts",
   "napi": {
@@ -8,12 +8,8 @@
     "triples": {
       "additional": [
         "aarch64-apple-darwin",
-        "aarch64-unknown-linux-gnu",
-        "aarch64-unknown-linux-musl",
-        "aarch64-pc-windows-msvc",
-        "armv7-unknown-linux-gnueabihf",
-        "armv7-unknown-linux-musleabihf",
-        "i686-pc-windows-msvc",
+        "x86_64-apple-darwin",
+        "x86_64-unknown-linux-gnu",
         "universal-apple-darwin"
       ]
     }
@@ -21,7 +17,9 @@
   "license": "MIT",
   "devDependencies": {
     "@napi-rs/cli": "^2.18.4",
-    "ava": "^6.0.1"
+    "@oxc-node/core": "^0.0.23",
+    "ava": "^6.0.1",
+    "oxlint": "^0.16.0"
   },
   "ava": {
     "timeout": "3m"
@@ -30,13 +28,11 @@
     "node": ">= 10"
   },
   "scripts": {
-    "artifacts": "napi artifacts",
-    "build": "napi build --cargo-name php_node --platform --release",
-    "build:debug": "napi build --cargo-name php_node --platform",
-    "prepublishOnly": "napi prepublish -t npm",
+    "build": "napi build --cargo-name php_node --platform --js false --release",
+    "build:debug": "napi build --cargo-name php_node --platform --js false",
+    "lint": "oxlint",
     "test": "ava __test__/**.spec.mjs",
     "universal": "napi universal",
     "version": "napi version"
-  },
-  "packageManager": "yarn@4.6.0"
+  }
 }

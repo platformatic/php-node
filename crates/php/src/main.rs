@@ -1,24 +1,35 @@
-use php::{Embed, Request};
+use php::{Embed, Handler, Request};
 
 pub fn main() {
-    let embed = Embed::new_with_args(std::env::args());
+  let code = "
+        http_response_code(123);
+        header('Content-Type: text/plain');
+        echo file_get_contents(\"php://input\");
+        echo \"\n\";
 
-    let request = Request::builder()
-        .method("GET")
-        .path("/test.php")
-        .body("Hello, World!")
-        .build();
+        $headers = apache_request_headers();
 
-    println!("method: {}", request.method());
-    println!("path: {}", request.path());
-    println!("body: {}", request.body());
+        foreach ($headers as $header => $value) {
+            echo \"$header: $value\n\";
+        }
+    ";
+  let filename = Some("test.php");
+  let embed = Embed::new_with_args(code, filename, std::env::args());
 
-    let response = embed.handle_request(
-        ";echo 'Hello, World!';",
-        Some("test.php"),
-        request.clone()
-    );
+  let request = Request::builder()
+    .method("POST")
+    .url("http://example.com/test.php")
+    .expect("invalid url")
+    .header("Content-Type", "text/html")
+    .header("Content-Length", 13.to_string())
+    .body("Hello, World!")
+    .build();
 
-    println!("Request: {:?}", request);
-    println!("Response: {:?}", response);
+  println!("request: {:#?}", request);
+
+  let response = embed
+    .handle(request.clone())
+    .expect("failed to handle request");
+
+  println!("response: {:#?}", response);
 }
