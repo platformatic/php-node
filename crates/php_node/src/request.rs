@@ -41,6 +41,9 @@ pub struct PhpRequest {
   request: Request,
 }
 
+// Future ideas:
+// - Support passing in a Node.js IncomingMessage object directly?
+// - Support web standard Request objects?
 #[napi]
 impl PhpRequest {
   /// Create a new PHP request.
