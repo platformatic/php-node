@@ -1,6 +1,6 @@
 {
   "name": "@platformatic/php",
-  "version": "0.1.1-dev2",
+  "version": "0.1.2",
   "main": "index.js",
   "types": "index.d.ts",
   "napi": {
