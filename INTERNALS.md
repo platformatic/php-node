@@ -13,6 +13,13 @@ make -j$([[ "$(uname)" == "Darwin" ]] && sysctl -n hw.physicalcpu || nproc)
 sudo make install
 ```
 
+```sh
+./buildconf
+./configure --enable-shared --enable-embed=shared --enable-zts --with-config-file-path=/usr/local/etc/php --with-config-file-scan-dir=/usr/local/etc/php/conf.d --enable-option-checking=fatal --with-mhash --with-pic --enable-mbstring --enable-mysqlnd --with-password-argon2 --with-sodium=shared --with-pdo-sqlite=/usr --with-sqlite3=/usr --with-curl --with-iconv --with-openssl --with-readline --with-zlib --disable-phpdbg --with-pear --disable-cgi
+make -j$([[ "$(uname)" == "Darwin" ]] && sysctl -n hw.physicalcpu || nproc)
+sudo make install
+```
+
 We'll probably want to build with additional extensions later, but this is a
 good starting point. Extensions should be able to load dynamically anyway,
 so easy enough to add them separately.

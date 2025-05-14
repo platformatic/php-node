@@ -138,6 +138,7 @@ jobs:
         with:
           repository: php/php-src
           path: php-src
+          ref: PHP-8.4
       - name: Install dependencies
         run: pnpm install
       - name: Give GitHub Actions access to ext-php-rs

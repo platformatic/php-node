@@ -17,6 +17,7 @@ fn main() {
     .or_else(|_| env::var("LD_PRELOAD_PATH"))
     .unwrap_or("/usr/local/lib".to_string());
 
+  println!("cargo:rustc-link-search={}", php_rpath);
   println!("cargo:rustc-link-lib=dylib=php");
   println!("cargo:rustc-link-arg=-Wl,-rpath,{}", php_rpath);
 
