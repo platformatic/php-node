@@ -26,11 +26,9 @@ function getNativeBinding({ platform, arch }) {
     name += '-msvc'
   }
 
-  try {
-    return require(`./npm/${name}/binding.node`)
-  } catch (err) {
-    // Fallback to top-level build file (what `napi build` produces)
-    // This simplifies local dev a bit.
-    return require(`./php.${name}.node`)
-  }
+  const path = process.env.TEST
+    ? `./php.${name}.node`
+    : `./npm/${name}/binding.node`
+
+  return require(path)
 }
