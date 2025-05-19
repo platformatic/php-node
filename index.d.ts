@@ -39,10 +39,8 @@ export interface PhpResponseOptions {
 export interface PhpOptions {
   /** The command-line arguments for the PHP instance. */
   argv?: Array<string>
-  /** The PHP code to embed. */
-  code: string
-  /** The filename for the PHP code. */
-  file?: string
+  /** The document root for the PHP instance. */
+  docroot: string
 }
 export type PhpHeaders = Headers
 /**

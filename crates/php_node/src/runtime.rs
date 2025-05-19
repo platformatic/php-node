@@ -13,10 +13,8 @@ use crate::{PhpRequest, PhpResponse};
 pub struct PhpOptions {
   /// The command-line arguments for the PHP instance.
   pub argv: Option<Vec<String>>,
-  /// The PHP code to embed.
-  pub code: String,
-  /// The filename for the PHP code.
-  pub file: Option<String>,
+  /// The document root for the PHP instance.
+  pub docroot: String,
 }
 
 /// A PHP instance.
@@ -54,15 +52,12 @@ impl PhpRuntime {
   /// ```
   #[napi(constructor)]
   pub fn new(options: PhpOptions) -> Self {
-    let code = options.code.clone();
-    let filename = options.file.clone();
+    let docroot = options.docroot.clone();
     let argv = options.argv.clone();
 
-    // TODO: Need to figure out how to send an Embed across threads
-    // so we can reuse the same Embed instance for multiple requests.
     let embed = match argv {
-      Some(argv) => Embed::new_with_argv(code, filename, argv),
-      None => Embed::new(code, filename),
+      Some(argv) => Embed::new_with_argv(docroot, argv),
+      None => Embed::new(docroot),
     };
 
     Self {

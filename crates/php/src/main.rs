@@ -1,20 +1,9 @@
 use php::{Embed, Handler, Request};
 
 pub fn main() {
-  let code = "
-        http_response_code(123);
-        header('Content-Type: text/plain');
-        echo file_get_contents(\"php://input\");
-        echo \"\n\";
-
-        $headers = apache_request_headers();
-
-        foreach ($headers as $header => $value) {
-            echo \"$header: $value\n\";
-        }
-    ";
-  let filename = Some("test.php");
-  let embed = Embed::new_with_args(code, filename, std::env::args());
+  let docroot = std::env::current_dir()
+    .expect("should have current_dir");
+  let embed = Embed::new_with_args(docroot, std::env::args());
 
   let request = Request::builder()
     .method("POST")
