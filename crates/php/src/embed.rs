@@ -29,7 +29,7 @@ use ext_php_rs::{
   },
 };
 
-use lang_handler::{Handler, Request, Response, ResponseBuilder};
+use lang_handler::{Handler, Header, Request, Response, ResponseBuilder};
 use libc::free;
 
 // This is a helper to ensure that PHP is initialized and deinitialized at the
@@ -697,6 +697,26 @@ pub extern "C" fn sapi_module_read_cookies() -> *mut c_char {
 #[no_mangle]
 pub extern "C" fn sapi_module_register_server_variables(vars: *mut ext_php_rs::types::Zval) {
   unsafe {
+    // use ext_php_rs::ffi::php_import_environment_variables;
+    // if let Some(f) = php_import_environment_variables {
+    //   f(vars);
+    // }
+
+    let request = RequestContext::current().map(|ctx| ctx.request())
+        .expect("should have request");
+
+    let headers = request.headers();
+
+    for (key, values) in headers.iter() {
+      let header = match values {
+        Header::Single(header) => header,
+        Header::Multiple(headers) => headers.first()
+          .expect("should have first header")
+      };
+      let cgi_key = format!("HTTP_{}", key.to_ascii_uppercase().replace("-", "_"));
+      php_register_variable(cstr(&cgi_key).unwrap(), cstr(header).unwrap(), vars);
+    }
+
     let globals = SapiGlobals::get();
     let req_info = &globals.request_info;
 
@@ -710,24 +730,13 @@ pub extern "C" fn sapi_module_register_server_variables(vars: *mut ext_php_rs::t
       c"".as_ptr()
     };
 
-    php_register_variable(cstr("HTTP_SEC_FETCH_DEST").unwrap(), cstr("document").unwrap(), vars);
-    php_register_variable(cstr("HTTP_USER_AGENT").unwrap(), cstr("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.4 Safari/605.1.15").unwrap(), vars);
-    php_register_variable(cstr("HTTP_UPGRADE_INSECURE_REQUESTS").unwrap(), cstr("1").unwrap(), vars);
-    php_register_variable(cstr("HTTP_ACCEPT").unwrap(), cstr("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8").unwrap(), vars);
-    php_register_variable(cstr("HTTP_SEC_FETCH_SITE").unwrap(), cstr("none").unwrap(), vars);
-    php_register_variable(cstr("HTTP_SEC_FETCH_MODE").unwrap(), cstr("navigate").unwrap(), vars);
-    php_register_variable(cstr("HTTP_ACCEPT_LANGUAGE").unwrap(), cstr("en-CA,en-US;q=0.9,en;q=0.8").unwrap(), vars);
-    php_register_variable(cstr("HTTP_PRIORITY").unwrap(), cstr("u=0, i").unwrap(), vars);
-    php_register_variable(cstr("HTTP_ACCEPT_ENCODING").unwrap(), cstr("gzip, deflate").unwrap(), vars);
-    php_register_variable(cstr("HTTP_CONNECTION").unwrap(), cstr("keep-alive").unwrap(), vars);
-    php_register_variable(cstr("PATH").unwrap(), cstr("/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin").unwrap(), vars);
-    php_register_variable(cstr("SERVER_SIGNATURE").unwrap(), cstr("
-      Apache/2.4.62 (Debian) Server at localhost Port 8080
+    // php_register_variable(cstr("PATH").unwrap(), cstr("/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin").unwrap(), vars);
+//     php_register_variable(cstr("SERVER_SIGNATURE").unwrap(), cstr("
+//       Apache/2.4.62 (Debian) Server at localhost Port 8080
 
-").unwrap(), vars);
-    php_register_variable(cstr("REQUEST_SCHEME").unwrap(), cstr("http").unwrap(), vars);
+// ").unwrap(), vars);
+    php_register_variable(cstr("REQUEST_SCHEME").unwrap(), cstr(request.url().scheme()).unwrap(), vars);
     php_register_variable(cstr("CONTEXT_PREFIX").unwrap(), cstr("").unwrap(), vars);
-    php_register_variable(cstr("CONTEXT_DOCUMENT_ROOT").unwrap(), cwd_cstr, vars);
     php_register_variable(cstr("SERVER_ADMIN").unwrap(), cstr("webmaster@localhost").unwrap(), vars);
     php_register_variable(cstr("GATEWAY_INTERFACE").unwrap(), cstr("CGI/1.1").unwrap(), vars);
 
@@ -736,6 +745,7 @@ pub extern "C" fn sapi_module_register_server_variables(vars: *mut ext_php_rs::t
     php_register_variable(cstr("SCRIPT_FILENAME").unwrap(), script_filename, vars);
     php_register_variable(cstr("PATH_TRANSLATED").unwrap(), script_filename, vars);
     php_register_variable(cstr("DOCUMENT_ROOT").unwrap(), cwd_cstr, vars);
+    php_register_variable(cstr("CONTEXT_DOCUMENT_ROOT").unwrap(), cwd_cstr, vars);
 
     if !req_info.request_uri.is_null() {
       php_register_variable(cstr("REQUEST_URI").unwrap(), req_info.request_uri, vars);
