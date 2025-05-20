@@ -2,20 +2,26 @@ import test from 'ava'
 
 import { Php, Request } from '../index.js'
 
+import { MockRoot } from './util.mjs'
+
 test('Support input/output streams', async (t) => {
-  const php = new Php({
-    argv: process.argv,
-    file: 'index.php',
-    code: `<?php
+  const mockroot = await MockRoot.from({
+    'index.php': `<?php
       if (file_get_contents('php://input') == 'Hello, from Node.js!') {
         echo 'Hello, from PHP!';
       }
     ?>`
   })
+  t.teardown(() => mockroot.clean())
+
+  const php = new Php({
+    argv: process.argv,
+    docroot: mockroot.path
+  })
 
   const req = new Request({
     method: 'GET',
-    url: 'http://example.com/test.php',
+    url: 'http://example.com/index.php',
     body: Buffer.from('Hello, from Node.js!')
   })
 
@@ -25,16 +31,21 @@ test('Support input/output streams', async (t) => {
 })
 
 test('Capture logs', async (t) => {
-  const php = new Php({
-    file: 'index.php',
-    code: `<?php
+  const mockroot = await MockRoot.from({
+    'index.php': `<?php
       error_log('Hello, from error_log!');
     ?>`
+  })
+  t.teardown(() => mockroot.clean())
+
+  const php = new Php({
+    argv: process.argv,
+    docroot: mockroot.path
   })
 
   const req = new Request({
     method: 'GET',
-    url: 'http://example.com/test.php'
+    url: 'http://example.com/index.php'
   })
 
   const res = await php.handleRequest(req)
@@ -43,16 +54,21 @@ test('Capture logs', async (t) => {
 })
 
 test('Capture exceptions', async (t) => {
-  const php = new Php({
-    file: 'index.php',
-    code: `<?php
+  const mockroot = await MockRoot.from({
+    'index.php': `<?php
       throw new Exception('Hello, from PHP!');
     ?>`
+  })
+  t.teardown(() => mockroot.clean())
+
+  const php = new Php({
+    argv: process.argv,
+    docroot: mockroot.path
   })
 
   const req = new Request({
     method: 'GET',
-    url: 'http://example.com/test.php'
+    url: 'http://example.com/index.php'
   })
 
   const res = await php.handleRequest(req)
@@ -62,19 +78,24 @@ test('Capture exceptions', async (t) => {
 })
 
 test('Support request and response headers', async (t) => {
-  const php = new Php({
-    file: 'index.php',
-    code: `<?php
+  const mockroot = await MockRoot.from({
+    'index.php': `<?php
       $headers = apache_request_headers();
       header("X-Test: Hello, from PHP!");
       // TODO: Does PHP expect headers be returned to uppercase?
-      echo $headers["x-test"];
+      echo $headers["X-Test"];
     ?>`
+  })
+  t.teardown(() => mockroot.clean())
+
+  const php = new Php({
+    argv: process.argv,
+    docroot: mockroot.path
   })
 
   const req = new Request({
     method: 'GET',
-    url: 'http://example.com/test.php',
+    url: 'http://example.com/index.php',
     headers: {
       'X-Test': ['Hello, from Node.js!']
     }

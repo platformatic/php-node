@@ -12,6 +12,8 @@ compile_flags.txt
 rustfmt.toml
 pnpm-lock.yaml
 *.node
+*.dylib
 !npm/**/*.node
+!npm/**/*.dylib
 __test__
 renovate.json
