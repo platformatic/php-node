@@ -164,7 +164,7 @@ impl std::fmt::Display for EmbedException {
       EmbedException::ResponseError => write!(f, "Error building response"),
       EmbedException::IoError(e) => write!(f, "IO error: {}", e),
       EmbedException::RelativizeError(e) => write!(f, "Path relativization error: {}", e),
-      EmbedException::CanonicalizeError(e) => write!(f, "Path canonicalization error: {}", e)
+      EmbedException::CanonicalizeError(e) => write!(f, "Path canonicalization error: {}", e),
     }
   }
 }
@@ -172,7 +172,7 @@ impl std::fmt::Display for EmbedException {
 /// Embed a PHP script into a Rust application to handle HTTP requests.
 #[derive(Debug)]
 pub struct Embed {
-  docroot: PathBuf
+  docroot: PathBuf,
 }
 
 // An embed instance may be constructed on the main thread and then shared
@@ -237,14 +237,9 @@ impl Embed {
   {
     SAPI_INIT.get_or_init(|| RwLock::new(Sapi::new(argv)));
 
-    let docroot = docroot
-      .as_ref()
-      .canonicalize()
-      .expect("should exist");
+    let docroot = docroot.as_ref().canonicalize().expect("should exist");
 
-    Embed {
-      docroot
-    }
+    Embed { docroot }
   }
 }
 
@@ -285,7 +280,7 @@ impl Handler for Embed {
     let path_translated = cstr(
       translate_path(&self.docroot, request_uri)?
         .display()
-        .to_string()
+        .to_string(),
     )?;
     let request_uri = cstr(request_uri)?;
 
@@ -306,7 +301,9 @@ impl Handler for Embed {
       use ext_php_rs::ffi::{_zend_file_handle__bindgen_ty_1, zend_file_handle, zend_stream};
 
       let mut file_handle = zend_file_handle {
-        handle: _zend_file_handle__bindgen_ty_1 { fp: std::ptr::null_mut() },
+        handle: _zend_file_handle__bindgen_ty_1 {
+          fp: std::ptr::null_mut(),
+        },
         filename: std::ptr::null_mut(),
         opened_path: std::ptr::null_mut(),
         type_: 0, //ZEND_HANDLE_FP
@@ -702,16 +699,16 @@ pub extern "C" fn sapi_module_register_server_variables(vars: *mut ext_php_rs::t
     //   f(vars);
     // }
 
-    let request = RequestContext::current().map(|ctx| ctx.request())
-        .expect("should have request");
+    let request = RequestContext::current()
+      .map(|ctx| ctx.request())
+      .expect("should have request");
 
     let headers = request.headers();
 
     for (key, values) in headers.iter() {
       let header = match values {
         Header::Single(header) => header,
-        Header::Multiple(headers) => headers.first()
-          .expect("should have first header")
+        Header::Multiple(headers) => headers.first().expect("should have first header"),
       };
       let cgi_key = format!("HTTP_{}", key.to_ascii_uppercase().replace("-", "_"));
       php_register_variable(cstr(&cgi_key).unwrap(), cstr(header).unwrap(), vars);
@@ -731,14 +728,26 @@ pub extern "C" fn sapi_module_register_server_variables(vars: *mut ext_php_rs::t
     };
 
     // php_register_variable(cstr("PATH").unwrap(), cstr("/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin").unwrap(), vars);
-//     php_register_variable(cstr("SERVER_SIGNATURE").unwrap(), cstr("
-//       Apache/2.4.62 (Debian) Server at localhost Port 8080
+    //     php_register_variable(cstr("SERVER_SIGNATURE").unwrap(), cstr("
+    //       Apache/2.4.62 (Debian) Server at localhost Port 8080
 
-// ").unwrap(), vars);
-    php_register_variable(cstr("REQUEST_SCHEME").unwrap(), cstr(request.url().scheme()).unwrap(), vars);
+    // ").unwrap(), vars);
+    php_register_variable(
+      cstr("REQUEST_SCHEME").unwrap(),
+      cstr(request.url().scheme()).unwrap(),
+      vars,
+    );
     php_register_variable(cstr("CONTEXT_PREFIX").unwrap(), cstr("").unwrap(), vars);
-    php_register_variable(cstr("SERVER_ADMIN").unwrap(), cstr("webmaster@localhost").unwrap(), vars);
-    php_register_variable(cstr("GATEWAY_INTERFACE").unwrap(), cstr("CGI/1.1").unwrap(), vars);
+    php_register_variable(
+      cstr("SERVER_ADMIN").unwrap(),
+      cstr("webmaster@localhost").unwrap(),
+      vars,
+    );
+    php_register_variable(
+      cstr("GATEWAY_INTERFACE").unwrap(),
+      cstr("CGI/1.1").unwrap(),
+      vars,
+    );
 
     php_register_variable(cstr("PHP_SELF").unwrap(), script_name, vars);
     php_register_variable(cstr("SCRIPT_NAME").unwrap(), script_name, vars);
@@ -888,11 +897,9 @@ where
 
   match docroot.join(relative_uri).join("index.php").canonicalize() {
     Ok(path) => Ok(path),
-    Err(_) => {
-      docroot
-        .join(relative_uri)
-        .canonicalize()
-        .map_err(EmbedException::CanonicalizeError)
-    }
+    Err(_) => docroot
+      .join(relative_uri)
+      .canonicalize()
+      .map_err(EmbedException::CanonicalizeError),
   }
 }
