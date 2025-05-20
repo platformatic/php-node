@@ -62,12 +62,12 @@ test('includes iterator methods', (t) => {
   const entries = Array.from(headers.entries())
     .sort((a, b) => a[0].localeCompare(b[0]))
   t.deepEqual(entries, [
-    ['accept', ['application/json']],
-    ['content-type', ['application/json']]
+    ['Accept', ['application/json']],
+    ['Content-Type', ['application/json']]
   ])
 
   const keys = Array.from(headers.keys()).sort()
-  t.deepEqual(keys, ['accept', 'content-type'])
+  t.deepEqual(keys, ['Accept', 'Content-Type'])
 
   const values = Array.from(headers.values()).sort()
   t.deepEqual(values, ['application/json', 'application/json'])
@@ -77,7 +77,7 @@ test('includes iterator methods', (t) => {
     seen.push([name, values, map])
   })
   t.deepEqual(seen.sort((a, b) => a[0].localeCompare(b[0])), [
-    ['accept', ['application/json'], headers],
-    ['content-type', ['application/json'], headers]
+    ['Accept', ['application/json'], headers],
+    ['Content-Type', ['application/json'], headers]
   ])
 })

@@ -3,7 +3,7 @@ use std::{
   env::Args,
   ffi::{c_char, c_int, c_void, CStr, CString, NulError},
   ops::Deref,
-  path::PathBuf,
+  path::{Path, PathBuf, StripPrefixError},
   str::FromStr,
   sync::{OnceLock, RwLock},
 };
@@ -29,55 +29,8 @@ use ext_php_rs::{
   },
 };
 
-use lang_handler::{Handler, Request, Response, ResponseBuilder};
+use lang_handler::{Handler, Header, Request, Response, ResponseBuilder};
 use libc::free;
-
-struct memory_stream {
-  ptr: *mut c_char,
-  len: usize,
-  available: usize,
-}
-
-#[no_mangle]
-unsafe extern "C" fn memory_stream_reader(
-  handle: *mut c_void,
-  buf: *mut c_char,
-  len: usize,
-) -> isize {
-  let stream = handle as *mut memory_stream;
-  if stream.is_null() {
-    return 0;
-  }
-
-  let stream = unsafe { &mut *stream };
-  if stream.available == 0 {
-    return 0;
-  }
-
-  let read_len = std::cmp::min(len, stream.available);
-  unsafe {
-    std::ptr::copy_nonoverlapping(stream.ptr as *const c_char, buf, read_len);
-  }
-  stream.available -= read_len;
-  stream.ptr = unsafe { stream.ptr.add(read_len) };
-  read_len as isize
-}
-
-#[no_mangle]
-unsafe extern "C" fn memory_stream_fsizer(handle: *mut c_void) -> usize {
-  let stream = handle as *mut memory_stream;
-  if stream.is_null() {
-    return 0;
-  }
-
-  let stream = unsafe { &mut *stream };
-  stream.len - stream.available
-}
-
-#[no_mangle]
-unsafe extern "C" fn memory_stream_closer(_handle: *mut c_void) {
-  // Nothing to do. The memory stream lifetime is managed by Rust
-}
 
 // This is a helper to ensure that PHP is initialized and deinitialized at the
 // appropriate times.
@@ -112,7 +65,9 @@ impl Sapi {
       .expect("Failed to build SAPI module");
 
     sapi.ini_defaults = Some(sapi_cli_ini_defaults);
+    sapi.php_ini_path_override = std::ptr::null_mut();
     sapi.php_ini_ignore_cwd = 1;
+    sapi.additional_functions = std::ptr::null();
     // sapi.phpinfo_as_text = 1;
 
     let exe_loc = argv.get(0).expect("should have exe location");
@@ -191,6 +146,8 @@ pub enum EmbedException {
   Bailout,
   ResponseError,
   IoError(std::io::Error),
+  RelativizeError(StripPrefixError),
+  CanonicalizeError(std::io::Error),
 }
 
 impl std::fmt::Display for EmbedException {
@@ -206,6 +163,8 @@ impl std::fmt::Display for EmbedException {
       EmbedException::Bailout => write!(f, "PHP bailout"),
       EmbedException::ResponseError => write!(f, "Error building response"),
       EmbedException::IoError(e) => write!(f, "IO error: {}", e),
+      EmbedException::RelativizeError(e) => write!(f, "Path relativization error: {}", e),
+      EmbedException::CanonicalizeError(e) => write!(f, "Path canonicalization error: {}", e),
     }
   }
 }
@@ -213,8 +172,7 @@ impl std::fmt::Display for EmbedException {
 /// Embed a PHP script into a Rust application to handle HTTP requests.
 #[derive(Debug)]
 pub struct Embed {
-  code: String,
-  filename: Option<String>,
+  docroot: PathBuf,
 }
 
 // An embed instance may be constructed on the main thread and then shared
@@ -232,12 +190,8 @@ impl Embed {
   ///
   /// let embed = Embed::new("echo 'Hello, world!';", Some("example.php"));
   /// ```
-  pub fn new<C, F>(code: C, filename: Option<F>) -> Self
-  where
-    C: Into<String>,
-    F: Into<String>,
-  {
-    Embed::new_with_argv::<C, F, String>(code, filename, vec![])
+  pub fn new<C: AsRef<Path>>(docroot: C) -> Self {
+    Embed::new_with_argv::<C, String>(docroot, vec![])
   }
 
   /// Creates a new `Embed` instance with command-line arguments.
@@ -250,12 +204,8 @@ impl Embed {
   /// let args = std::env::args();
   /// let embed = Embed::new_with_args("echo $argv[1];", Some("example.php"), args);
   /// ```
-  pub fn new_with_args<C, F>(code: C, filename: Option<F>, args: Args) -> Self
-  where
-    C: Into<String>,
-    F: Into<String>,
-  {
-    Embed::new_with_argv(code, filename, args.collect())
+  pub fn new_with_args<C: AsRef<Path>>(docroot: C, args: Args) -> Self {
+    Embed::new_with_argv(docroot, args.collect())
   }
 
   /// Creates a new `Embed` instance with command-line arguments.
@@ -280,18 +230,16 @@ impl Embed {
   /// # // TODO: Uncomment when argv gets passed through correctly.
   /// # // assert_eq!(response.body(), "Hello, world!");
   /// ```
-  pub fn new_with_argv<C, F, S>(code: C, filename: Option<F>, argv: Vec<S>) -> Self
+  pub fn new_with_argv<C, S>(docroot: C, argv: Vec<S>) -> Self
   where
-    C: Into<String>,
-    F: Into<String>,
+    C: AsRef<Path>,
     S: AsRef<str> + std::fmt::Debug,
   {
     SAPI_INIT.get_or_init(|| RwLock::new(Sapi::new(argv)));
 
-    Embed {
-      code: code.into(),
-      filename: filename.map(|v| v.into()),
-    }
+    let docroot = docroot.as_ref().canonicalize().expect("should exist");
+
+    Embed { docroot }
   }
 }
 
@@ -325,32 +273,19 @@ impl Handler for Embed {
     // Initialize the SAPI module
     Sapi::startup().map_err(|_| EmbedException::SapiStartupError)?;
 
+    let url = request.url();
+
     // Get code and filename to execute
-    let code = cstr(self.code.clone())?;
-    let cwd = maybe_current_dir()?;
-    let request_uri = default_cstr(
-      "<unnamed>",
-      self
-        .filename
-        .clone()
-        .map(|v| PathBuf::new().join("/").join(v).display().to_string()),
+    let request_uri = url.path();
+    let path_translated = cstr(
+      translate_path(&self.docroot, request_uri)?
+        .display()
+        .to_string(),
     )?;
-    let path_translated = default_cstr(
-      "<unnamed>",
-      self.filename.clone().map(|v| {
-        cwd
-          .join(".".to_string() + &v)
-          .canonicalize()
-          .unwrap_or(cwd.clone())
-          .display()
-          .to_string()
-      }),
-    )?;
+    let request_uri = cstr(request_uri)?;
 
     // Extract request information
     let request_method = cstr(request.method())?;
-
-    let url = request.url();
     let query_string = cstr(url.query().unwrap_or(""))?;
 
     let headers = request.headers();
@@ -365,37 +300,20 @@ impl Handler for Embed {
     let mut file_handle = unsafe {
       use ext_php_rs::ffi::{_zend_file_handle__bindgen_ty_1, zend_file_handle, zend_stream};
 
-      let mut mem_stream = memory_stream {
-        ptr: code,
-        len: self.code.len(),
-        available: self.code.len(),
-      };
-
-      let stream = zend_stream {
-        handle: &mut mem_stream as *mut _ as *mut c_void,
-        isatty: 0,
-        reader: Some(memory_stream_reader),
-        fsizer: Some(memory_stream_fsizer),
-        closer: Some(memory_stream_closer),
-      };
-
       let mut file_handle = zend_file_handle {
-        handle: _zend_file_handle__bindgen_ty_1 { stream },
+        handle: _zend_file_handle__bindgen_ty_1 {
+          fp: std::ptr::null_mut(),
+        },
         filename: std::ptr::null_mut(),
         opened_path: std::ptr::null_mut(),
-        type_: 2, // ZEND_HANDLE_STREAM
-        primary_script: true,
+        type_: 0, //ZEND_HANDLE_FP
+        primary_script: false,
         in_list: false,
         buf: std::ptr::null_mut(),
         len: 0,
       };
 
       zend_stream_init_filename(&mut file_handle, path_translated);
-      file_handle.handle = _zend_file_handle__bindgen_ty_1 { stream };
-      // file_handle.opened_path = file_handle.filename;
-      file_handle.opened_path = std::ptr::null_mut();
-      file_handle.type_ = 2; // ZEND_HANDLE_STREAM
-      file_handle.primary_script = true;
 
       // TODO: Make a scope to do zend_destroy_file_handle at the end.
 
@@ -439,12 +357,6 @@ impl Handler for Embed {
             // return Err(EmbedException::ExecuteError);
           }
 
-          // if unsafe {
-          //     zend_eval_string_ex(code, std::ptr::null_mut(), filename, false)
-          // } != ZEND_RESULT_CODE_SUCCESS {
-          //     return Err(EmbedException::ExecuteError);
-          // }
-
           if let Some(err) = ExecutorGlobals::take_exception() {
             {
               let mut globals = SapiGlobals::get_mut();
@@ -465,7 +377,6 @@ impl Handler for Embed {
           Ok(())
         })
         .map_or_else(|_err| Err(EmbedException::Bailout), |res| res)?;
-        // .map_err(|_| EmbedException::Bailout)?;
 
         let (mimetype, http_response_code) = {
           let globals = SapiGlobals::get();
@@ -782,12 +693,25 @@ pub extern "C" fn sapi_module_read_cookies() -> *mut c_char {
 
 #[no_mangle]
 pub extern "C" fn sapi_module_register_server_variables(vars: *mut ext_php_rs::types::Zval) {
-  // println!("sapi_module_register_server_variables");
   unsafe {
-    if let Some(php_import_environment_variables) =
-      ext_php_rs::ffi::php_import_environment_variables
-    {
-      php_import_environment_variables(vars);
+    // use ext_php_rs::ffi::php_import_environment_variables;
+    // if let Some(f) = php_import_environment_variables {
+    //   f(vars);
+    // }
+
+    let request = RequestContext::current()
+      .map(|ctx| ctx.request())
+      .expect("should have request");
+
+    let headers = request.headers();
+
+    for (key, values) in headers.iter() {
+      let header = match values {
+        Header::Single(header) => header,
+        Header::Multiple(headers) => headers.first().expect("should have first header"),
+      };
+      let cgi_key = format!("HTTP_{}", key.to_ascii_uppercase().replace("-", "_"));
+      php_register_variable(cstr(&cgi_key).unwrap(), cstr(header).unwrap(), vars);
     }
 
     let globals = SapiGlobals::get();
@@ -803,12 +727,38 @@ pub extern "C" fn sapi_module_register_server_variables(vars: *mut ext_php_rs::t
       c"".as_ptr()
     };
 
+    // php_register_variable(cstr("PATH").unwrap(), cstr("/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin").unwrap(), vars);
+    //     php_register_variable(cstr("SERVER_SIGNATURE").unwrap(), cstr("
+    //       Apache/2.4.62 (Debian) Server at localhost Port 8080
+
+    // ").unwrap(), vars);
+    php_register_variable(
+      cstr("REQUEST_SCHEME").unwrap(),
+      cstr(request.url().scheme()).unwrap(),
+      vars,
+    );
+    php_register_variable(cstr("CONTEXT_PREFIX").unwrap(), cstr("").unwrap(), vars);
+    php_register_variable(
+      cstr("SERVER_ADMIN").unwrap(),
+      cstr("webmaster@localhost").unwrap(),
+      vars,
+    );
+    php_register_variable(
+      cstr("GATEWAY_INTERFACE").unwrap(),
+      cstr("CGI/1.1").unwrap(),
+      vars,
+    );
+
     php_register_variable(cstr("PHP_SELF").unwrap(), script_name, vars);
     php_register_variable(cstr("SCRIPT_NAME").unwrap(), script_name, vars);
-    php_register_variable(cstr("REQUEST_URI").unwrap(), script_name, vars);
     php_register_variable(cstr("SCRIPT_FILENAME").unwrap(), script_filename, vars);
     php_register_variable(cstr("PATH_TRANSLATED").unwrap(), script_filename, vars);
     php_register_variable(cstr("DOCUMENT_ROOT").unwrap(), cwd_cstr, vars);
+    php_register_variable(cstr("CONTEXT_DOCUMENT_ROOT").unwrap(), cwd_cstr, vars);
+
+    if !req_info.request_uri.is_null() {
+      php_register_variable(cstr("REQUEST_URI").unwrap(), req_info.request_uri, vars);
+    }
 
     php_register_variable(
       cstr("SERVER_PROTOCOL").unwrap(),
@@ -828,7 +778,10 @@ pub extern "C" fn sapi_module_register_server_variables(vars: *mut ext_php_rs::t
     // TODO: This should pull from the _real_ headers
     php_register_variable(cstr("HTTP_HOST").unwrap(), c"localhost:3000".as_ptr(), vars);
     php_register_variable(cstr("SERVER_NAME").unwrap(), c"localhost".as_ptr(), vars);
+    php_register_variable(cstr("SERVER_ADDR").unwrap(), c"172.19.0.2".as_ptr(), vars);
     php_register_variable(cstr("SERVER_PORT").unwrap(), c"3000".as_ptr(), vars);
+    php_register_variable(cstr("REMOTE_ADDR").unwrap(), c"192.168.65.1".as_ptr(), vars);
+    php_register_variable(cstr("REMOTE_PORT").unwrap(), c"21845".as_ptr(), vars);
 
     if !req_info.request_method.is_null() {
       php_register_variable(
@@ -839,7 +792,7 @@ pub extern "C" fn sapi_module_register_server_variables(vars: *mut ext_php_rs::t
     }
 
     if !req_info.cookie_data.is_null() {
-      php_register_variable(cstr("COOKIE").unwrap(), req_info.cookie_data, vars);
+      php_register_variable(cstr("HTTP_COOKIE").unwrap(), req_info.cookie_data, vars);
     }
 
     if !req_info.query_string.is_null() {
@@ -929,4 +882,24 @@ fn maybe_current_dir() -> Result<PathBuf, EmbedException> {
     .unwrap_or(std::path::PathBuf::from("/"))
     .canonicalize()
     .map_err(EmbedException::IoError)
+}
+
+fn translate_path<D, P>(docroot: D, request_uri: P) -> Result<PathBuf, EmbedException>
+where
+  D: AsRef<Path>,
+  P: AsRef<Path>,
+{
+  let docroot = docroot.as_ref().to_path_buf();
+  let request_uri = request_uri.as_ref();
+  let relative_uri = request_uri
+    .strip_prefix("/")
+    .map_err(EmbedException::RelativizeError)?;
+
+  match docroot.join(relative_uri).join("index.php").canonicalize() {
+    Ok(path) => Ok(path),
+    Err(_) => docroot
+      .join(relative_uri)
+      .canonicalize()
+      .map_err(EmbedException::CanonicalizeError),
+  }
 }

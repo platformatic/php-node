@@ -317,7 +317,7 @@ impl ResponseBuilder {
     K: Into<String>,
     V: Into<String>,
   {
-    self.headers.set(key, value);
+    self.headers.add(key, value);
     self
   }
 

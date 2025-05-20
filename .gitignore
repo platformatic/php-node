@@ -195,6 +195,7 @@ Cargo.lock
 !.yarn/versions
 
 *.node
+*.dylib
 
 # Added by static-php-cli
 crates/php/buildroot
