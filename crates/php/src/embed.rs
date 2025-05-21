@@ -727,11 +727,6 @@ pub extern "C" fn sapi_module_register_server_variables(vars: *mut ext_php_rs::t
       c"".as_ptr()
     };
 
-    // php_register_variable(cstr("PATH").unwrap(), cstr("/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin").unwrap(), vars);
-    //     php_register_variable(cstr("SERVER_SIGNATURE").unwrap(), cstr("
-    //       Apache/2.4.62 (Debian) Server at localhost Port 8080
-
-    // ").unwrap(), vars);
     php_register_variable(
       cstr("REQUEST_SCHEME").unwrap(),
       cstr(request.url().scheme()).unwrap(),
@@ -773,15 +768,31 @@ pub extern "C" fn sapi_module_register_server_variables(vars: *mut ext_php_rs::t
       vars,
     );
 
-    // TODO: REMOTE_ADDR, REMOTE_PORT
+    if let Some(info) = request.local_socket() {
+      php_register_variable(
+        cstr("SERVER_ADDR").unwrap(),
+        cstr(info.ip().to_string()).unwrap(),
+        vars,
+      );
+      php_register_variable(
+        cstr("SERVER_PORT").unwrap(),
+        cstr(info.port().to_string()).unwrap(),
+        vars,
+      );
+    }
 
-    // TODO: This should pull from the _real_ headers
-    php_register_variable(cstr("HTTP_HOST").unwrap(), c"localhost:3000".as_ptr(), vars);
-    php_register_variable(cstr("SERVER_NAME").unwrap(), c"localhost".as_ptr(), vars);
-    php_register_variable(cstr("SERVER_ADDR").unwrap(), c"172.19.0.2".as_ptr(), vars);
-    php_register_variable(cstr("SERVER_PORT").unwrap(), c"3000".as_ptr(), vars);
-    php_register_variable(cstr("REMOTE_ADDR").unwrap(), c"192.168.65.1".as_ptr(), vars);
-    php_register_variable(cstr("REMOTE_PORT").unwrap(), c"21845".as_ptr(), vars);
+    if let Some(info) = request.remote_socket() {
+      php_register_variable(
+        cstr("REMOTE_ADDR").unwrap(),
+        cstr(info.ip().to_string()).unwrap(),
+        vars,
+      );
+      php_register_variable(
+        cstr("REMOTE_PORT").unwrap(),
+        cstr(info.port().to_string()).unwrap(),
+        vars,
+      );
+    }
 
     if !req_info.request_method.is_null() {
       php_register_variable(

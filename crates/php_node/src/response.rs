@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use napi::bindgen_prelude::*;
+use napi::Result;
 
 use php::Response;
 
@@ -52,15 +53,15 @@ impl PhpResponse {
   /// });
   /// ```
   #[napi(constructor)]
-  pub fn constructor(options: PhpResponseOptions) -> Self {
+  pub fn constructor(options: PhpResponseOptions) -> Result<Self> {
     let mut builder = Response::builder();
     builder.status(options.status);
 
     if let Some(headers) = options.headers {
       for key in headers.keys() {
-        let values = headers
-          .get(key)
-          .expect(format!("missing header values for key: {}", key).as_str());
+        let values = headers.get(key).ok_or_else(|| {
+          Error::from_reason(format!("Missing header values for key \"{}\"", key))
+        })?;
 
         for value in values {
           builder.header(key.clone(), value.clone());
@@ -80,9 +81,9 @@ impl PhpResponse {
       builder.exception(exception);
     }
 
-    PhpResponse {
+    Ok(PhpResponse {
       response: builder.build(),
-    }
+    })
   }
 
   /// Get the HTTP status code for the response.

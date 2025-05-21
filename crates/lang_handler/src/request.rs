@@ -1,4 +1,7 @@
-use std::fmt::Debug;
+use std::{
+  fmt::Debug,
+  net::{AddrParseError, SocketAddr},
+};
 
 use bytes::{Bytes, BytesMut};
 use url::{ParseError, Url};
@@ -37,6 +40,8 @@ pub struct Request {
   headers: Headers,
   // TODO: Support Stream bodies when napi.rs supports it
   body: Bytes,
+  local_socket: Option<SocketAddr>,
+  remote_socket: Option<SocketAddr>,
 }
 
 unsafe impl Sync for Request {}
@@ -57,14 +62,25 @@ impl Request {
   ///   "POST".to_string(),
   ///   "http://example.com/test.php".parse().unwrap(),
   ///   headers,
-  ///   "Hello, World!"
+  ///   "Hello, World!",
+  ///   None,
+  ///   None,
   /// );
-  pub fn new<T: Into<Bytes>>(method: String, url: Url, headers: Headers, body: T) -> Self {
+  pub fn new<T: Into<Bytes>>(
+    method: String,
+    url: Url,
+    headers: Headers,
+    body: T,
+    local_socket: Option<SocketAddr>,
+    remote_socket: Option<SocketAddr>,
+  ) -> Self {
     Self {
       method,
       url,
       headers,
       body: body.into(),
+      local_socket,
+      remote_socket,
     }
   }
 
@@ -133,7 +149,9 @@ impl Request {
   ///   "POST".to_string(),
   ///   "http://example.com/test.php".parse().unwrap(),
   ///   Headers::new(),
-  ///   "Hello, World!"
+  ///   "Hello, World!",
+  ///   None,
+  ///   None,
   /// );
   ///
   /// assert_eq!(request.method(), "POST");
@@ -153,7 +171,9 @@ impl Request {
   ///   "POST".to_string(),
   ///   "http://example.com/test.php".parse().unwrap(),
   ///   Headers::new(),
-  ///   "Hello, World!"
+  ///   "Hello, World!",
+  ///   None,
+  ///   None,
   /// );
   ///
   /// assert_eq!(request.url().as_str(), "http://example.com/test.php");
@@ -176,7 +196,9 @@ impl Request {
   ///   "POST".to_string(),
   ///   "http://example.com/test.php".parse().unwrap(),
   ///   headers,
-  ///   "Hello, World!"
+  ///   "Hello, World!",
+  ///   None,
+  ///   None,
   /// );
   ///
   /// assert_eq!(request.headers().get("Accept"), Some(&vec!["text/html".to_string()]));
@@ -196,13 +218,59 @@ impl Request {
   ///   "POST".to_string(),
   ///   "http://example.com/test.php".parse().unwrap(),
   ///   Headers::new(),
-  ///   "Hello, World!"
+  ///   "Hello, World!",
+  ///   None,
+  ///   None,
   /// );
   ///
   /// assert_eq!(request.body(), "Hello, World!");
   /// ```
   pub fn body(&self) -> Bytes {
     self.body.clone()
+  }
+
+  /// Returns the local socket address of the request.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use lang_handler::{Request, Headers};
+  ///
+  /// let request = Request::new(
+  ///   "POST".to_string(),
+  ///   "http://example.com/test.php".parse().unwrap(),
+  ///   Headers::new(),
+  ///   "Hello, World!",
+  ///   None,
+  ///   None,
+  /// );
+  ///
+  /// assert_eq!(request.local_socket(), None);
+  /// ```
+  pub fn local_socket(&self) -> Option<SocketAddr> {
+    self.local_socket
+  }
+
+  /// Returns the remote socket address of the request.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use lang_handler::{Request, Headers};
+  ///
+  /// let request = Request::new(
+  ///   "POST".to_string(),
+  ///   "http://example.com/test.php".parse().unwrap(),
+  ///   Headers::new(),
+  ///   "Hello, World!",
+  ///   None,
+  ///   None,
+  /// );
+  ///
+  /// assert_eq!(request.remote_socket(), None);
+  /// ```
+  pub fn remote_socket(&self) -> Option<SocketAddr> {
+    self.remote_socket
   }
 }
 
@@ -233,6 +301,8 @@ pub struct RequestBuilder {
   url: Option<Url>,
   headers: Headers,
   body: BytesMut,
+  local_socket: Option<SocketAddr>,
+  remote_socket: Option<SocketAddr>,
 }
 
 impl RequestBuilder {
@@ -251,6 +321,8 @@ impl RequestBuilder {
       url: None,
       headers: Headers::new(),
       body: BytesMut::with_capacity(1024),
+      local_socket: None,
+      remote_socket: None,
     }
   }
 
@@ -285,6 +357,8 @@ impl RequestBuilder {
       url: Some(request.url().clone()),
       headers: request.headers().clone(),
       body: BytesMut::from(request.body()),
+      local_socket: request.local_socket.clone(),
+      remote_socket: request.remote_socket.clone(),
     }
   }
 
@@ -372,6 +446,58 @@ impl RequestBuilder {
     self
   }
 
+  /// Sets the local socket of the request.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use lang_handler::RequestBuilder;
+  ///
+  /// let request = RequestBuilder::new()
+  ///   .local_socket("127.0.0.1:8080").expect("invalid local socket")
+  ///   .build();
+  ///
+  /// assert_eq!(request.local_socket(), "127.0.0.1:8080");
+  /// ```
+  pub fn local_socket<T>(mut self, local_socket: T) -> Result<Self, AddrParseError>
+  where
+    T: Into<String>,
+  {
+    match local_socket.into().parse() {
+      Err(e) => Err(e),
+      Ok(local_socket) => {
+        self.local_socket = Some(local_socket);
+        Ok(self)
+      }
+    }
+  }
+
+  /// Sets the remote socket of the request.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use lang_handler::RequestBuilder;
+  ///
+  /// let request = RequestBuilder::new()
+  ///   .remote_socket("127.0.0.1:8080").expect("invalid remote socket")
+  ///   .build();
+  ///
+  /// assert_eq!(request.remote_socket(), "127.0.0.1:8080");
+  /// ```
+  pub fn remote_socket<T>(mut self, remote_socket: T) -> Result<Self, AddrParseError>
+  where
+    T: Into<String>,
+  {
+    match remote_socket.into().parse() {
+      Err(e) => Err(e),
+      Ok(remote_socket) => {
+        self.remote_socket = Some(remote_socket);
+        Ok(self)
+      }
+    }
+  }
+
   /// Builds the request.
   ///
   /// # Examples
@@ -395,6 +521,8 @@ impl RequestBuilder {
         .unwrap_or_else(|| Url::parse("http://example.com").unwrap()),
       headers: self.headers,
       body: self.body.freeze(),
+      local_socket: self.local_socket,
+      remote_socket: self.remote_socket,
     }
   }
 }
