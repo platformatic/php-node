@@ -1,8 +1,10 @@
-import { join, resolve } from 'path'
-import { readFileSync } from 'fs'
-import { createServer } from 'http'
+import { argv, cwd } from 'node:process'
+import { join, resolve } from 'node:path'
+import { readFileSync } from 'node:fs'
+import { createServer } from 'node:http'
+import { strictEqual } from 'node:assert'
+
 import { Php, Request } from '../index.js'
-import { strictEqual } from 'assert'
 
 // Read homepage html
 const { dirname } = import.meta
@@ -10,8 +12,8 @@ const homepage = readFileSync(join(dirname, 'index.html'), 'utf8')
 
 // Create reusable PHP instance
 const php = new Php({
-  file: 'index.php',
-  code: readFileSync(resolve(dirname, 'index.php'), 'utf8')
+  argv,
+  docroot: cwd()
 })
 
 const server = createServer(async (req, res) => {
@@ -24,8 +26,8 @@ const server = createServer(async (req, res) => {
 
   const url = urlForRequest(req)
 
-  // Every page except /info should show the homepage.
-  if (url.pathname !== '/info') {
+  // Every page except /info.php should show the homepage.
+  if (url.pathname !== '/info.php') {
     res.writeHead(200, {
       'Content-Type': 'text/html'
     })
@@ -37,7 +39,8 @@ const server = createServer(async (req, res) => {
     method: req.method,
     url: url.href,
     headers: fixHeaders(req.headers),
-    body: Buffer.concat(chunks)
+    body: Buffer.concat(chunks),
+    socket: req.socket
   })
 
   try {
@@ -54,7 +57,7 @@ const server = createServer(async (req, res) => {
 
 server.listen(3000, async () => {
   const { port } = server.address()
-  const url = `http://localhost:${port}/info`
+  const url = `http://localhost:${port}/info.php`
 
   const res = await fetch(url, {
     method: 'POST',

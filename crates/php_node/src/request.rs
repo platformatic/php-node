@@ -1,10 +1,24 @@
 use std::collections::HashMap;
 
 use napi::bindgen_prelude::*;
+use napi::Result;
 
 use php::{Request, RequestBuilder};
 
 use crate::PhpHeaders;
+
+#[napi(object)]
+#[derive(Default)]
+pub struct PhpRequestSocketOptions {
+  /// The string representation of the local IP address the remote client is connecting on.
+  pub local_address: String,
+  /// The numeric representation of the local port. For example, 80 or 21.
+  pub local_port: u16,
+  /// The string representation of the remote IP address.
+  pub remote_address: String,
+  /// The numeric representation of the remote port. For example, 80 or 21.
+  pub remote_port: u16,
+}
 
 /// Options for creating a new PHP request.
 #[napi(object)]
@@ -20,6 +34,8 @@ pub struct PhpRequestOptions {
   pub headers: Option<HashMap<String, Vec<String>>>,
   /// The body for the request.
   pub body: Option<Uint8Array>,
+  /// The socket information for the request.
+  pub socket: Option<PhpRequestSocketOptions>,
 }
 
 /// A PHP request.
@@ -61,17 +77,28 @@ impl PhpRequest {
   /// });
   /// ```
   #[napi(constructor)]
-  pub fn constructor(options: PhpRequestOptions) -> Self {
+  pub fn constructor(options: PhpRequestOptions) -> Result<Self> {
     let mut builder: RequestBuilder = Request::builder()
       .method(options.method)
-      .url(options.url)
-      .expect("invalid url");
+      .url(&options.url)
+      .map_err(|_| Error::from_reason(format!("Invalid URL \"{}\"", options.url)))?;
+
+    if let Some(socket) = options.socket {
+      let local_socket = format!("{}:{}", socket.local_address, socket.local_port);
+      let remote_socket = format!("{}:{}", socket.remote_address, socket.remote_port);
+
+      builder = builder
+        .local_socket(&local_socket)
+        .map_err(|_| Error::from_reason(format!("Invalid local socket \"{}\"", local_socket)))?
+        .remote_socket(&remote_socket)
+        .map_err(|_| Error::from_reason(format!("Invalid remote socket \"{}\"", remote_socket)))?;
+    }
 
     if let Some(headers) = options.headers {
       for key in headers.keys() {
-        let values = headers
-          .get(key)
-          .expect(format!("missing header values for key: {}", key).as_str());
+        let values = headers.get(key).ok_or_else(|| {
+          Error::from_reason(format!("Missing header values for key \"{}\"", key))
+        })?;
 
         for value in values {
           builder = builder.header(key.clone(), value.clone())
@@ -83,9 +110,9 @@ impl PhpRequest {
       builder = builder.body(body.as_ref())
     }
 
-    PhpRequest {
+    Ok(PhpRequest {
       request: builder.build(),
-    }
+    })
   }
 
   /// Get the HTTP method for the request.

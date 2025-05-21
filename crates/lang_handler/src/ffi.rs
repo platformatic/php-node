@@ -1,6 +1,6 @@
 use std::{
-  ffi,
-  ffi::{c_char, CStr, CString},
+  ffi::{self, c_char, CStr, CString},
+  net::SocketAddr,
 };
 
 use bytes::{Buf, BufMut};
@@ -216,6 +216,20 @@ impl From<&lh_request_t> for Request {
   }
 }
 
+fn c_char_to_socket_addr(value: *const ffi::c_char) -> Option<SocketAddr> {
+  if value.is_null() {
+    return None;
+  }
+
+  // Convert to &str
+  let value = match unsafe { CStr::from_ptr(value) }.to_str() {
+    Err(_) => return None,
+    Ok(s) => s,
+  };
+
+  value.parse::<SocketAddr>().ok()
+}
+
 /// Create a new `lh_request_t`.
 ///
 /// # Examples
@@ -229,6 +243,8 @@ pub extern "C" fn lh_request_new(
   url: *const ffi::c_char,
   headers: *mut lh_headers_t,
   body: *const ffi::c_char,
+  local_socket: *const ffi::c_char,
+  remote_socket: *const ffi::c_char,
 ) -> *mut lh_request_t {
   let method = unsafe { CStr::from_ptr(method).to_string_lossy().into_owned() };
   let url_str = unsafe { CStr::from_ptr(url).to_string_lossy().into_owned() };
@@ -238,8 +254,17 @@ pub extern "C" fn lh_request_new(
   } else {
     Some(unsafe { CStr::from_ptr(body).to_bytes() })
   };
+  let local_socket = c_char_to_socket_addr(local_socket);
+  let remote_socket = c_char_to_socket_addr(remote_socket);
   let headers = unsafe { &*headers };
-  let request = Request::new(method, url, headers.into(), body.unwrap_or(&[]));
+  let request = Request::new(
+    method,
+    url,
+    headers.into(),
+    body.unwrap_or(&[]),
+    local_socket,
+    remote_socket,
+  );
   Box::into_raw(Box::new(request.into()))
 }
 

@@ -12,7 +12,7 @@ use crate::{PhpRequest, PhpResponse};
 #[derive(Clone, Default)]
 pub struct PhpOptions {
   /// The command-line arguments for the PHP instance.
-  pub argv: Option<Vec<String>>,
+  pub argv: Vec<String>,
   /// The document root for the PHP instance.
   pub docroot: String,
 }
@@ -55,10 +55,7 @@ impl PhpRuntime {
     let docroot = options.docroot.clone();
     let argv = options.argv.clone();
 
-    let embed = match argv {
-      Some(argv) => Embed::new_with_argv(docroot, argv),
-      None => Embed::new(docroot),
-    };
+    let embed = Embed::new_with_argv(docroot, argv);
 
     Self {
       embed: Arc::new(embed),
