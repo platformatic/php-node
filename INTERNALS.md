@@ -1,4 +1,23 @@
-## Build
+# Build
+
+## Prerequisites
+
+### MAC OS X
+
+Install the following tools:
+
+```
+brew install autoconf automake libtool re2c bison libiconv
+```
+
+Add the following to your `~/.bash_profile` or `~/.zshrc`:
+
+```sh
+export PATH="$(brew --prefix bison)/bin:$(brew --prefix libiconv)/bin:$PATH"
+export LDFLAGS="$LDFLAGS -L$(brew --prefix bison)/lib -L$(brew --prefix libiconv)/lib"
+```
+
+Create a new shell session to load the new environment variables.
 
 ### Building PHP
 
@@ -35,7 +54,7 @@ must be set to adjust the rpath to `$ORIGIN` in the build output.
 RUSTFLAGS="-C link-args=-Wl,-rpath,\$ORIGIN" npm run build
 ```
 
-## Various learnings
+# Various learnings
 
 ### php://input
 
