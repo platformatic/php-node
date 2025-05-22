@@ -8,7 +8,6 @@ pub fn main() {
   let request = Request::builder()
     .method("POST")
     .url("http://example.com/test.php")
-    .expect("invalid url")
     .header("Content-Type", "text/html")
     .header("Content-Length", 13.to_string())
     .body("Hello, World!")

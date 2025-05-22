@@ -1,12 +1,9 @@
-use std::{
-  fmt::Debug,
-  net::{AddrParseError, SocketAddr},
-};
+use std::{fmt::Debug, net::SocketAddr};
 
 use bytes::{Bytes, BytesMut};
-use url::{ParseError, Url};
+use url::Url;
 
-use crate::Headers;
+use super::Headers;
 
 /// Represents an HTTP request. Includes the method, URL, headers, and body.
 ///
@@ -17,7 +14,7 @@ use crate::Headers;
 ///
 /// let request = Request::builder()
 ///   .method("POST")
-///   .url("http://example.com/test.php").expect("invalid url")
+///   .url("http://example.com/test.php")
 ///   .header("Accept", "text/html")
 ///   .header("Accept", "application/json")
 ///   .header("Host", "example.com")
@@ -94,7 +91,7 @@ impl Request {
   ///
   /// let request = Request::builder()
   ///   .method("POST")
-  ///   .url("http://example.com/test.php").expect("invalid url")
+  ///   .url("http://example.com/test.php")
   ///   .header("Content-Type", "text/html")
   ///   .header("Content-Length", 13.to_string())
   ///   .body("Hello, World!")
@@ -120,7 +117,7 @@ impl Request {
   ///
   /// let request = Request::builder()
   ///   .method("GET")
-  ///   .url("http://example.com/test.php").expect("invalid url")
+  ///   .url("http://example.com/test.php")
   ///   .header("Content-Type", "text/plain")
   ///   .build()
   ///   .expect("should build request");
@@ -282,13 +279,21 @@ impl Request {
 #[derive(Debug, PartialEq)]
 pub enum RequestBuilderException {
   /// Url is required
-  MissingUrl,
+  UrlMissing,
+  /// Url could not be parsed
+  UrlParseFailed(String),
+  /// SocketAddr could not be parsed
+  SocketParseFailed(String),
 }
 
 impl std::fmt::Display for RequestBuilderException {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     match self {
-      RequestBuilderException::MissingUrl => write!(f, "Expected url to be set"),
+      RequestBuilderException::UrlMissing => write!(f, "Expected url to be set"),
+      RequestBuilderException::UrlParseFailed(u) => write!(f, "Failed to parse url: \"{}\"", u),
+      RequestBuilderException::SocketParseFailed(s) => {
+        write!(f, "Failed to parse socket info: \"{}\"", s)
+      }
     }
   }
 }
@@ -302,7 +307,7 @@ impl std::fmt::Display for RequestBuilderException {
 ///
 /// let request = Request::builder()
 ///   .method("POST")
-///   .url("http://example.com/test.php").expect("invalid url")
+///   .url("http://example.com/test.php")
 ///   .header("Content-Type", "text/html")
 ///   .header("Content-Length", 13.to_string())
 ///   .body("Hello, World!")
@@ -318,11 +323,11 @@ impl std::fmt::Display for RequestBuilderException {
 #[derive(Clone)]
 pub struct RequestBuilder {
   method: Option<String>,
-  url: Option<Url>,
+  url: Option<String>,
   headers: Headers,
   body: BytesMut,
-  local_socket: Option<SocketAddr>,
-  remote_socket: Option<SocketAddr>,
+  local_socket: Option<String>,
+  remote_socket: Option<String>,
 }
 
 impl RequestBuilder {
@@ -377,11 +382,11 @@ impl RequestBuilder {
   pub fn extend(request: &Request) -> Self {
     Self {
       method: Some(request.method().into()),
-      url: Some(request.url().clone()),
+      url: Some(request.url().to_string()),
       headers: request.headers().clone(),
       body: BytesMut::from(request.body()),
-      local_socket: request.local_socket,
-      remote_socket: request.remote_socket,
+      local_socket: request.local_socket.map(|s| s.to_string()),
+      remote_socket: request.remote_socket.map(|s| s.to_string()),
     }
   }
 
@@ -394,7 +399,7 @@ impl RequestBuilder {
   ///
   /// let request = RequestBuilder::new()
   ///  .method("POST")
-  ///  .url("http://example.com/test.php").expect("invalid url")
+  ///  .url("http://example.com/test.php")
   ///  .build()
   ///   .expect("should build request");
   ///
@@ -413,23 +418,18 @@ impl RequestBuilder {
   /// use lang_handler::RequestBuilder;
   ///
   /// let request = RequestBuilder::new()
-  ///   .url("http://example.com/test.php").expect("invalid url")
+  ///   .url("http://example.com/test.php")
   ///   .build()
   ///   .expect("should build request");
   ///
   /// assert_eq!(request.url().as_str(), "http://example.com/test.php");
   /// ```
-  pub fn url<T>(mut self, url: T) -> Result<Self, ParseError>
+  pub fn url<T>(mut self, url: T) -> Self
   where
     T: Into<String>,
   {
-    match url.into().parse() {
-      Ok(url) => {
-        self.url = Some(url);
-        Ok(self)
-      }
-      Err(e) => Err(e),
-    }
+    self.url = Some(url.into());
+    self
   }
 
   /// Sets a header of the request.
@@ -440,7 +440,7 @@ impl RequestBuilder {
   /// use lang_handler::RequestBuilder;
   ///
   /// let request = RequestBuilder::new()
-  ///   .url("http://example.com/test.php").expect("invalid url")
+  ///   .url("http://example.com/test.php")
   ///   .header("Accept", "text/html")
   ///   .build()
   ///   .expect("should build request");
@@ -464,7 +464,7 @@ impl RequestBuilder {
   /// use lang_handler::RequestBuilder;
   ///
   /// let request = RequestBuilder::new()
-  ///   .url("http://example.com/test.php").expect("invalid url")
+  ///   .url("http://example.com/test.php")
   ///   .body("Hello, World!")
   ///   .build()
   ///   .expect("should build request");
@@ -485,8 +485,8 @@ impl RequestBuilder {
   /// use lang_handler::RequestBuilder;
   ///
   /// let request = RequestBuilder::new()
-  ///   .url("http://example.com/test.php").expect("invalid url")
-  ///   .local_socket("127.0.0.1:8080").expect("invalid local socket")
+  ///   .url("http://example.com/test.php")
+  ///   .local_socket("127.0.0.1:8080")
   ///   .build()
   ///   .expect("should build request");
   ///
@@ -495,17 +495,12 @@ impl RequestBuilder {
   ///   .expect("should parse");
   /// assert_eq!(request.local_socket(), Some(expected));
   /// ```
-  pub fn local_socket<T>(mut self, local_socket: T) -> Result<Self, AddrParseError>
+  pub fn local_socket<T>(mut self, local_socket: T) -> Self
   where
     T: Into<String>,
   {
-    match local_socket.into().parse() {
-      Err(e) => Err(e),
-      Ok(local_socket) => {
-        self.local_socket = Some(local_socket);
-        Ok(self)
-      }
-    }
+    self.local_socket = Some(local_socket.into());
+    self
   }
 
   /// Sets the remote socket of the request.
@@ -517,8 +512,8 @@ impl RequestBuilder {
   /// use lang_handler::RequestBuilder;
   ///
   /// let request = RequestBuilder::new()
-  ///   .url("http://example.com/test.php").expect("invalid url")
-  ///   .remote_socket("127.0.0.1:8080").expect("invalid remote socket")
+  ///   .url("http://example.com/test.php")
+  ///   .remote_socket("127.0.0.1:8080")
   ///   .build()
   ///   .expect("should build request");
   ///
@@ -527,17 +522,12 @@ impl RequestBuilder {
   ///   .expect("should parse");
   /// assert_eq!(request.remote_socket(), Some(expected));
   /// ```
-  pub fn remote_socket<T>(mut self, remote_socket: T) -> Result<Self, AddrParseError>
+  pub fn remote_socket<T>(mut self, remote_socket: T) -> Self
   where
     T: Into<String>,
   {
-    match remote_socket.into().parse() {
-      Err(e) => Err(e),
-      Ok(remote_socket) => {
-        self.remote_socket = Some(remote_socket);
-        Ok(self)
-      }
-    }
+    self.remote_socket = Some(remote_socket.into());
+    self
   }
 
   /// Builds the request.
@@ -548,7 +538,7 @@ impl RequestBuilder {
   /// use lang_handler::RequestBuilder;
   ///
   /// let request = RequestBuilder::new()
-  ///   .url("http://example.com/test.php").expect("invalid url")
+  ///   .url("http://example.com/test.php")
   ///   .build()
   ///   .expect("should build request");
   ///
@@ -559,11 +549,11 @@ impl RequestBuilder {
   pub fn build(self) -> Result<Request, RequestBuilderException> {
     Ok(Request {
       method: self.method.unwrap_or_else(|| "GET".to_string()),
-      url: self.url.ok_or(RequestBuilderException::MissingUrl)?,
+      url: parse_url(self.url)?,
       headers: self.headers,
       body: self.body.freeze(),
-      local_socket: self.local_socket,
-      remote_socket: self.remote_socket,
+      local_socket: parse_socket(self.local_socket)?,
+      remote_socket: parse_socket(self.remote_socket)?,
     })
   }
 }
@@ -572,4 +562,24 @@ impl Default for RequestBuilder {
   fn default() -> Self {
     Self::new()
   }
+}
+
+fn parse_url(url: Option<String>) -> Result<Url, RequestBuilderException> {
+  url
+    .ok_or(RequestBuilderException::UrlMissing)
+    .and_then(|u| {
+      u.parse()
+        .map_err(|_| RequestBuilderException::UrlParseFailed(u))
+    })
+}
+
+fn parse_socket(socket: Option<String>) -> Result<Option<SocketAddr>, RequestBuilderException> {
+  socket.map_or_else(
+    || Ok(None),
+    |s| {
+      Ok(Some(s.parse::<SocketAddr>().map_err(|_| {
+        RequestBuilderException::SocketParseFailed(s)
+      })?))
+    },
+  )
 }

@@ -1,6 +1,6 @@
 use bytes::{Bytes, BytesMut};
 
-use crate::Headers;
+use super::Headers;
 
 /// Represents an HTTP response. This includes the status code, headers, body, log, and exception.
 ///
