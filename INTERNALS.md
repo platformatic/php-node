@@ -7,15 +7,34 @@ Building PHP itself is straightforward. Here's the basic configuration:
 ```sh
 git clone https://github.com/php/php-src.git
 cd php-src
-./buildconf
-./configure --enable-shared --enable-embed=shared --enable-zts --without-iconv --with-pdo-mysql=mysqlnd --with-mysqli=mysqlnd --with-openssl --with-curl --enable-mbstring
-make -j$([[ "$(uname)" == "Darwin" ]] && sysctl -n hw.physicalcpu || nproc)
-sudo make install
-```
 
-```sh
+if [[ "$(uname)" == "Darwin" ]]; then
+  export PATH="$(brew --prefix bison)/bin:$(brew --prefix libiconv)/bin:$PATH"
+  export LDFLAGS="$LDFLAGS -L$(brew --prefix bison)/lib -L$(brew --prefix libiconv)/lib -L$(brew --prefix readline)/lib"
+fi
+
 ./buildconf
-./configure --enable-shared --enable-embed=shared --enable-zts --with-config-file-path=/usr/local/etc/php --with-config-file-scan-dir=/usr/local/etc/php/conf.d --enable-option-checking=fatal --with-mhash --with-pic --enable-mbstring --enable-mysqlnd --with-password-argon2 --with-sodium=shared --with-pdo-sqlite=/usr --with-sqlite3=/usr --with-curl --with-iconv --with-openssl --with-readline --with-zlib --disable-phpdbg --with-pear --disable-cgi
+./configure \
+  --enable-shared --enable-embed=shared \
+  --with-config-file-path=/usr/local/etc/php \
+  --with-config-file-scan-dir=/usr/local/etc/php/conf.d \
+  --enable-option-checking=fatal \
+  --with-pic \
+  --enable-zts \
+  --enable-mysqlnd --with-pdo-mysql=mysqlnd --with-mysqli=mysqlnd \
+  --with-pdo-sqlite=/usr --with-sqlite3=/usr \
+  --with-openssl --with-password-argon2 --with-sodium=shared \
+  --with-curl \
+  --enable-mbstring --with-mhash \
+  --enable-exif --enable-gd \
+  --with-zip --with-zlib \
+  --without-iconv \
+  --with-readline \
+  --disable-phpdbg \
+  --with-pear \
+  --enable-fileinfo \
+  --disable-cgi
+
 make -j$([[ "$(uname)" == "Darwin" ]] && sysctl -n hw.physicalcpu || nproc)
 sudo make install
 ```

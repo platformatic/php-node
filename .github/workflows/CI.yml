@@ -42,7 +42,8 @@ jobs:
             # build: pnpm build --target aarch64-apple-darwin
             build: pnpm build
             setup: |
-              brew install autoconf automake libtool re2c bison libiconv
+              brew install autoconf automake libtool re2c bison libiconv \
+              argon2 libzip
 
           # TODO: Do we need to care about x86_64 macOS?
           # NOTE: Unable to force link bison on macOS 13, which php-src requires.
@@ -51,7 +52,8 @@ jobs:
             # build: pnpm build --target x86_64-apple-darwin
             build: pnpm build
             setup: |
-              brew install autoconf automake libtool re2c bison libiconv
+              brew install autoconf automake libtool re2c bison libiconv \
+              argon2 libzip
 
           #
           # Linux
@@ -64,10 +66,12 @@ jobs:
             # build: pnpm build --target x86_64-unknown-linux-gnu
             build: pnpm build
             setup: |
-              sudo apt-get update
-              sudo apt-get install -y libssl-dev pkg-config build-essential \
+              apt-get update
+              apt-get install -y curl libssl-dev pkg-config build-essential \
                 libcurl4-openssl-dev autoconf libxml2-dev libsqlite3-dev \
-                bison re2c libonig-dev patchelf
+                bison re2c libonig-dev patchelf zlib1g-dev openssh-client git \
+                libclang-dev libreadline-dev libpng-dev libjpeg-dev libzip-dev \
+                libsodium-dev libargon2-dev
 
           # TODO: Can't use the musl container, need to build with ssh-agent access.
           # TODO: Fails because missing x86_64-linux-musl-gcc
@@ -152,17 +156,42 @@ jobs:
         if: ${{ !matrix.settings.docker }}
         shell: bash
         run: |
+          set -x
           ${{ matrix.settings.setup }}
 
           # Use brew bison and libiconv manually. Force linking does not work on macOS 13
           if [[ "$(uname)" == "Darwin" ]]; then
-            export PATH="$(brew --prefix bison)/bin:$(brew --prefix libiconv)/bin:$PATH"
-            export LDFLAGS="$LDFLAGS -L$(brew --prefix bison)/lib -L$(brew --prefix libiconv)/lib"
+            # Expose bison to compiler
+            export PATH="$(brew --prefix bison)/bin:$PATH"
+            export LDFLAGS="$LDFLAGS -L$(brew --prefix bison)/lib"
+            export CPPFLAGS="$CPPFLAGS -I$(brew --prefix bison)/include"
           fi
 
           cd php-src
           ./buildconf
-          ./configure --enable-shared --enable-embed=shared --enable-zts --without-iconv --with-pdo-mysql=mysqlnd --with-mysqli=mysqlnd --with-openssl --with-curl --enable-mbstring
+
+          # TODO: Figure out why macOS can't find libiconv and libpng (for gd)
+          ./configure \
+            --enable-shared --enable-embed=shared \
+            --with-config-file-path=/usr/local/etc/php \
+            --with-config-file-scan-dir=/usr/local/etc/php/conf.d \
+            --enable-option-checking=fatal \
+            --with-pic \
+            --enable-zts \
+            --enable-mysqlnd --with-pdo-mysql=mysqlnd --with-mysqli=mysqlnd \
+            --with-pdo-sqlite=/usr --with-sqlite3=/usr \
+            --with-openssl --with-password-argon2 --with-sodium=shared \
+            --with-curl \
+            --enable-mbstring --with-mhash \
+            --enable-exif `#--enable-gd` \
+            --with-zip --with-zlib \
+            --without-iconv \
+            --without-readline \
+            --disable-phpdbg \
+            --with-pear \
+            --enable-fileinfo \
+            --disable-cgi
+
           make -j$([[ "$(uname)" == "Darwin" ]] && sysctl -n hw.physicalcpu || nproc)
           sudo make install
           cd ..
@@ -178,12 +207,8 @@ jobs:
           options: '--user 0:0 -v ${{ github.workspace }}/.cargo-cache/git/db:/usr/local/cargo/git/db -v ${{ github.workspace }}/.cargo/registry/cache:/usr/local/cargo/registry/cache -v ${{ github.workspace }}/.cargo/registry/index:/usr/local/cargo/registry/index -v ${{ github.workspace }}:/build -w /build'
           shell: bash
           run: |
-            # Can't use the setup script because docker lacks sudo
-            apt-get update
-            apt-get install -y curl libssl-dev pkg-config build-essential \
-              libcurl4-openssl-dev autoconf libxml2-dev libsqlite3-dev \
-              bison re2c libonig-dev patchelf zlib1g-dev openssh-client git \
-              libclang-dev
+            set -x
+            ${{ matrix.settings.setup }}
 
             # Install rust toolchain
             curl https://sh.rustup.rs -sSf | bash -s -- -y -t ${{ matrix.settings.target }}
@@ -206,8 +231,30 @@ jobs:
 
             # Build PHP
             cd php-src
-            ./buildconf
-            ./configure --enable-shared --enable-embed=shared --enable-zts --without-iconv --with-pdo-mysql=mysqlnd --with-mysqli=mysqlnd --with-openssl --with-curl --enable-mbstring
+            ./buildconf --force
+
+            ./configure \
+              --prefix=/usr \
+              --enable-shared --enable-embed=shared \
+              --with-config-file-path=/usr/local/etc/php \
+              --with-config-file-scan-dir=/usr/local/etc/php/conf.d \
+              --enable-option-checking=fatal \
+              --with-pic \
+              --enable-zts \
+              --enable-mysqlnd --with-pdo-mysql=mysqlnd --with-mysqli=mysqlnd \
+              --with-pdo-sqlite=/usr --with-sqlite3=/usr \
+              --with-openssl --with-password-argon2 --with-sodium=shared \
+              --with-curl \
+              --enable-mbstring --with-mhash \
+              --enable-exif --enable-gd \
+              --with-zip --with-zlib \
+              --without-iconv \
+              --with-readline \
+              --disable-phpdbg \
+              --with-pear \
+              --enable-fileinfo \
+              --disable-cgi
+
             make -j$([[ "$(uname)" == "Darwin" ]] && sysctl -n hw.physicalcpu || nproc)
             make install
             cd ..
@@ -267,12 +314,12 @@ jobs:
             target: x86_64-apple-darwin
             architecture: x64
             setup: |
-              brew install openssl@3
+              brew install openssl@3 argon2
           - host: macos-15
             target: aarch64-apple-darwin
             architecture: arm64
             setup: |
-              brew install openssl@3
+              brew install openssl@3 argon2 libzip
           # - host: windows-latest
           #   target: x86_64-pc-windows-msvc
           #   architecture: x64
@@ -390,7 +437,9 @@ jobs:
             apt-get update
             apt-get install -y libssl-dev pkg-config build-essential \
               libcurl4-openssl-dev autoconf libxml2-dev libsqlite3-dev \
-              bison re2c libonig-dev
+              bison re2c libonig-dev libargon2-dev libzip-dev zlib1g-dev \
+              openssh-client libclang-dev libreadline-dev libpng-dev \
+              libjpeg-dev libsodium-dev
 
             npm run test
 
