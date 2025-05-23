@@ -24,7 +24,7 @@ impl From<&Header> for String {
 /// let mut headers = Headers::new();
 /// headers.set("Content-Type", "text/plain");
 ///
-/// assert_eq!(headers.get("Content-Type"), Some(&vec!["text/plain".to_string()]));
+/// assert_eq!(headers.get("Content-Type"), Some("text/plain".to_string()));
 /// ```
 #[derive(Debug, Clone)]
 pub struct Headers(HashMap<String, Header>);
@@ -73,7 +73,7 @@ impl Headers {
   /// headers.add("Accept", "text/plain");
   /// headers.add("Accept", "application/json");
   ///
-  /// assert_eq!(headers.get("Accept"), Some(&"application/json".to_string()));
+  /// assert_eq!(headers.get("Accept"), Some("application/json".to_string()));
   /// ```
   pub fn get<K>(&self, key: K) -> Option<String>
   where
@@ -157,7 +157,7 @@ impl Headers {
   /// headers.set("Content-Type", "text/plain");
   /// headers.set("Content-Type", "text/html");
   ///
-  /// assert_eq!(headers.get("Content-Type"), Some(&"text/html".to_string()));
+  /// assert_eq!(headers.get("Content-Type"), Some("text/html".to_string()));
   /// ```
   pub fn set<K, V>(&mut self, key: K, value: V)
   where
@@ -180,10 +180,10 @@ impl Headers {
   /// headers.add("Accept", "text/plain");
   /// headers.add("Accept", "application/json");
   ///
-  /// assert_eq!(headers.get("Accept"), Some(&vec![
+  /// assert_eq!(headers.get_all("Accept"), vec![
   ///   "text/plain".to_string(),
   ///   "application/json".to_string()
-  /// ]));
+  /// ]);
   /// ```
   pub fn add<K, V>(&mut self, key: K, value: V)
   where
@@ -256,7 +256,8 @@ impl Headers {
   /// # Examples
   ///
   /// ```
-  /// # use lang_handler::Headers;
+  /// use lang_handler::Headers;
+  ///
   /// let mut headers = Headers::new();
   /// headers.set("Content-Type", "text/plain");
   /// headers.set("Accept", "application/json");
@@ -265,6 +266,21 @@ impl Headers {
   /// ```
   pub fn len(&self) -> usize {
     self.0.len()
+  }
+
+  /// Checks if the headers are empty.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use lang_handler::Headers;
+  ///
+  /// let headers = Headers::new();
+  ///
+  /// assert_eq!(headers.is_empty(), true);
+  /// ```
+  pub fn is_empty(&self) -> bool {
+    self.len() == 0
   }
 
   /// Returns an iterator over the headers.
@@ -283,5 +299,11 @@ impl Headers {
   /// ```
   pub fn iter(&self) -> impl Iterator<Item = (&String, &Header)> {
     self.0.iter()
+  }
+}
+
+impl Default for Headers {
+  fn default() -> Self {
+    Self::new()
   }
 }

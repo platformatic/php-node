@@ -2,7 +2,8 @@ use php::{Embed, Handler, Request};
 
 pub fn main() {
   let docroot = std::env::current_dir().expect("should have current_dir");
-  let embed = Embed::new_with_args(docroot, std::env::args());
+
+  let embed = Embed::new_with_args(docroot, std::env::args()).expect("should construct embed");
 
   let request = Request::builder()
     .method("POST")
@@ -11,13 +12,14 @@ pub fn main() {
     .header("Content-Type", "text/html")
     .header("Content-Length", 13.to_string())
     .body("Hello, World!")
-    .build();
+    .build()
+    .expect("should build request");
 
   println!("request: {:#?}", request);
 
   let response = embed
     .handle(request.clone())
-    .expect("failed to handle request");
+    .expect("should handle request");
 
   println!("response: {:#?}", response);
 }

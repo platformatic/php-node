@@ -46,11 +46,14 @@ pub trait Handler {
   /// #     Ok(response)
   /// #   }
   /// # }
-  /// let handler = MyHandler;
+  /// # let handler = MyHandler;
+  /// #
   /// let request = Request::builder()
   ///   .method("GET")
   ///   .url("http://example.com").expect("invalid url")
-  ///   .build();
+  ///   .build()
+  ///   .expect("should build request");
+  ///
   /// let response = handler.handle(request).unwrap();
   /// ```
   fn handle(&self, request: Request) -> Result<Response, Self::Error>;
