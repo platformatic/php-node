@@ -64,24 +64,16 @@ where
 {
   let docroot = docroot.as_ref().to_path_buf();
   let request_uri = request_uri.as_ref();
-  let relative_uri = request_uri
-    .strip_prefix("/")
-    .map_err(|_| {
-      let uri = request_uri.display().to_string();
-      EmbedException::ExpectedAbsoluteRequestUri(uri)
-    })?;
+  let relative_uri = request_uri.strip_prefix("/").map_err(|_| {
+    let uri = request_uri.display().to_string();
+    EmbedException::ExpectedAbsoluteRequestUri(uri)
+  })?;
 
-  let exact = docroot
-    .join(relative_uri);
+  let exact = docroot.join(relative_uri);
 
-  exact
-    .join("index.php")
-    .canonicalize()
-    .or_else(|_| {
-      exact
-        .canonicalize()
-        .map_err(|_| {
-          EmbedException::ScriptNotFound(exact.display().to_string())
-        })
-    })
+  exact.join("index.php").canonicalize().or_else(|_| {
+    exact
+      .canonicalize()
+      .map_err(|_| EmbedException::ScriptNotFound(exact.display().to_string()))
+  })
 }

@@ -251,6 +251,7 @@ jobs:
       # TODO: This should be moved to the test jobs, but needs build deps
       # for ext-php-rs to build correctly, including PHP cli
       - name: Test crates
+        if: ${{ contains(matrix.target, 'linux') }}
         shell: bash
         run: cargo test
       - name: Upload target-specific package for ${{ matrix.settings.target }}
