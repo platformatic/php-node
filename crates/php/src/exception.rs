@@ -28,7 +28,9 @@ impl std::fmt::Display for EmbedException {
       EmbedException::SapiNotInitialized => write!(f, "Failed to initialize SAPI"),
       EmbedException::SapiLockFailed => write!(f, "Failed to acquire SAPI lock"),
       EmbedException::SapiMissingStartupFunction => write!(f, "Missing SAPI startup function"),
-      EmbedException::FailedToFindExeLocation => write!(f, "Failed to identify executable location"),
+      EmbedException::FailedToFindExeLocation => {
+        write!(f, "Failed to identify executable location")
+      }
       EmbedException::DocRootNotFound(docroot) => write!(f, "Document root not found: {}", docroot),
       EmbedException::SapiNotStarted => write!(f, "Failed to start SAPI"),
       EmbedException::SapiRequestNotStarted => write!(f, "Failed to start SAPI request"),
@@ -39,8 +41,12 @@ impl std::fmt::Display for EmbedException {
       EmbedException::Exception(e) => write!(f, "Exception thrown: {}", e),
       EmbedException::Bailout => write!(f, "PHP bailout"),
       EmbedException::ResponseBuildError => write!(f, "Failed to build response"),
-      EmbedException::FailedToFindCurrentDirectory => write!(f, "Failed to identify current directory"),
-      EmbedException::ExpectedAbsoluteRequestUri(e) => write!(f, "Expected absolute REQUEST_URI: {}", e),
+      EmbedException::FailedToFindCurrentDirectory => {
+        write!(f, "Failed to identify current directory")
+      }
+      EmbedException::ExpectedAbsoluteRequestUri(e) => {
+        write!(f, "Expected absolute REQUEST_URI: {}", e)
+      }
       EmbedException::ScriptNotFound(e) => write!(f, "Script not found: {}", e),
     }
   }
