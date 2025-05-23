@@ -70,7 +70,7 @@ impl Sapi {
       .first()
       .map(|s| s.to_string())
       .or_else(|| current_exe().ok().map(|p| p.display().to_string()))
-      .ok_or(EmbedException::ExeLocationError)?;
+      .ok_or(EmbedException::FailedToFindExeLocation)?;
 
     sapi.executable_location = cstr(exe_loc)?;
     let mut boxed = Box::new(sapi);
@@ -106,7 +106,7 @@ impl Sapi {
       .startup
       .ok_or(EmbedException::SapiMissingStartupFunction)?;
     if unsafe { startup(sapi) } != ZEND_RESULT_CODE_SUCCESS {
-      return Err(EmbedException::SapiStartupError);
+      return Err(EmbedException::SapiNotStarted);
     }
     Ok(())
   }
@@ -336,6 +336,12 @@ pub extern "C" fn sapi_module_register_server_variables(vars: *mut ext_php_rs::t
         php_register_variable(cstr("PATH_TRANSLATED")?, script_filename, vars);
         php_register_variable(cstr("DOCUMENT_ROOT")?, cwd_cstr, vars);
         php_register_variable(cstr("CONTEXT_DOCUMENT_ROOT")?, cwd_cstr, vars);
+
+        if let Ok(server_name) = hostname::get() {
+          if let Some(server_name) = server_name.to_str() {
+            php_register_variable(cstr("SERVER_NAME")?, cstr(server_name)?, vars);
+          }
+        }
 
         if !req_info.request_uri.is_null() {
           php_register_variable(cstr("REQUEST_URI")?, req_info.request_uri, vars);

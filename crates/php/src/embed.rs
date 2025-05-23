@@ -285,7 +285,7 @@ impl Handler for Embed {
               .status(http_response_code)
               .header("Content-Type", mime)
           })
-          .ok_or(EmbedException::ResponseError)?
+          .ok_or(EmbedException::ResponseBuildError)?
       };
 
       Ok(response_builder.build())

@@ -12,7 +12,7 @@ impl RequestScope {
   /// Starts a new request scope in which a PHP request may operate.
   pub fn new() -> Result<Self, EmbedException> {
     if unsafe { php_request_startup() } != ZEND_RESULT_CODE_SUCCESS {
-      return Err(EmbedException::RequestStartupError);
+      return Err(EmbedException::SapiRequestNotStarted);
     }
 
     Ok(RequestScope())
