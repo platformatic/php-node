@@ -22,15 +22,16 @@ use crate::Headers;
 ///   .header("Accept", "application/json")
 ///   .header("Host", "example.com")
 ///   .body("Hello, World!")
-///   .build();
+///   .build()
+///   .expect("should build request");
 ///
 /// assert_eq!(request.method(), "POST");
 /// assert_eq!(request.url().as_str(), "http://example.com/test.php");
-/// assert_eq!(request.headers().get("Accept"), Some(&vec![
+/// assert_eq!(request.headers().get_all("Accept"), vec![
 ///   "text/html".to_string(),
 ///   "application/json".to_string()
-/// ]));
-/// assert_eq!(request.headers().get("Host"), Some(&vec!["example.com".to_string()]));
+/// ]);
+/// assert_eq!(request.headers().get("Host"), Some("example.com".to_string()));
 /// assert_eq!(request.body(), "Hello, World!");
 /// ```
 #[derive(Clone, Debug)]
@@ -97,12 +98,13 @@ impl Request {
   ///   .header("Content-Type", "text/html")
   ///   .header("Content-Length", 13.to_string())
   ///   .body("Hello, World!")
-  ///   .build();
+  ///   .build()
+  ///   .expect("should build request");
   ///
   /// assert_eq!(request.method(), "POST");
   /// assert_eq!(request.url().as_str(), "http://example.com/test.php");
-  /// assert_eq!(request.headers().get("Content-Type"), Some(&vec!["text/html".to_string()]));
-  /// assert_eq!(request.headers().get("Content-Length"), Some(&vec!["13".to_string()]));
+  /// assert_eq!(request.headers().get("Content-Type"), Some("text/html".to_string()));
+  /// assert_eq!(request.headers().get("Content-Length"), Some("13".to_string()));
   /// assert_eq!(request.body(), "Hello, World!");
   /// ```
   pub fn builder() -> RequestBuilder {
@@ -120,18 +122,20 @@ impl Request {
   ///   .method("GET")
   ///   .url("http://example.com/test.php").expect("invalid url")
   ///   .header("Content-Type", "text/plain")
-  ///   .build();
+  ///   .build()
+  ///   .expect("should build request");
   ///
   /// let extended = request.extend()
   ///   .method("POST")
   ///   .header("Content-Length", 12.to_string())
   ///   .body("Hello, World")
-  ///   .build();
+  ///   .build()
+  ///   .expect("should build request");
   ///
   /// assert_eq!(extended.method(), "POST");
   /// assert_eq!(extended.url().as_str(), "http://example.com/test.php");
-  /// assert_eq!(extended.headers().get("Content-Type"), Some(&vec!["text/plain".to_string()]));
-  /// assert_eq!(extended.headers().get("Content-Length"), Some(&vec!["12".to_string()]));
+  /// assert_eq!(extended.headers().get("Content-Type"), Some("text/plain".to_string()));
+  /// assert_eq!(extended.headers().get("Content-Length"), Some("12".to_string()));
   /// assert_eq!(extended.body(), "Hello, World");
   /// ```
   pub fn extend(&self) -> RequestBuilder {
@@ -201,7 +205,7 @@ impl Request {
   ///   None,
   /// );
   ///
-  /// assert_eq!(request.headers().get("Accept"), Some(&vec!["text/html".to_string()]));
+  /// assert_eq!(request.headers().get("Accept"), Some("text/html".to_string()));
   /// ```
   pub fn headers(&self) -> &Headers {
     &self.headers
@@ -274,6 +278,21 @@ impl Request {
   }
 }
 
+/// Errors which may be produced when building a Request from a RequestBuilder.
+#[derive(Debug, PartialEq)]
+pub enum RequestBuilderException {
+  /// Url is required
+  MissingUrl,
+}
+
+impl std::fmt::Display for RequestBuilderException {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    match self {
+      RequestBuilderException::MissingUrl => write!(f, "Expected url to be set"),
+    }
+  }
+}
+
 /// Builds an HTTP request.
 ///
 /// # Examples
@@ -287,12 +306,13 @@ impl Request {
 ///   .header("Content-Type", "text/html")
 ///   .header("Content-Length", 13.to_string())
 ///   .body("Hello, World!")
-///   .build();
+///   .build()
+///   .expect("should build request");
 ///
 /// assert_eq!(request.method(), "POST");
 /// assert_eq!(request.url().as_str(), "http://example.com/test.php");
-/// assert_eq!(request.headers().get("Content-Type"), Some(&vec!["text/html".to_string()]));
-/// assert_eq!(request.headers().get("Content-Length"), Some(&vec!["13".to_string()]));
+/// assert_eq!(request.headers().get("Content-Type"), Some("text/html".to_string()));
+/// assert_eq!(request.headers().get("Content-Length"), Some("13".to_string()));
 /// assert_eq!(request.body(), "Hello, World!");
 /// ```
 #[derive(Clone)]
@@ -340,15 +360,18 @@ impl RequestBuilder {
   ///   "GET".to_string(),
   ///   "http://example.com".parse().unwrap(),
   ///   headers,
-  ///   "Hello, World!"
+  ///   "Hello, World!",
+  ///   None,
+  ///   None
   /// );
   ///
   /// let extended = RequestBuilder::extend(&request)
-  ///   .build();
+  ///   .build()
+  ///   .expect("should build request");
   ///
   /// assert_eq!(extended.method(), "GET");
   /// assert_eq!(extended.url().as_str(), "http://example.com/");
-  /// assert_eq!(extended.headers().get("Accept"), Some(&vec!["text/html".to_string()]));
+  /// assert_eq!(extended.headers().get("Accept"), Some("text/html".to_string()));
   /// assert_eq!(extended.body(), "Hello, World!");
   /// ```
   pub fn extend(request: &Request) -> Self {
@@ -357,8 +380,8 @@ impl RequestBuilder {
       url: Some(request.url().clone()),
       headers: request.headers().clone(),
       body: BytesMut::from(request.body()),
-      local_socket: request.local_socket.clone(),
-      remote_socket: request.remote_socket.clone(),
+      local_socket: request.local_socket,
+      remote_socket: request.remote_socket,
     }
   }
 
@@ -371,7 +394,9 @@ impl RequestBuilder {
   ///
   /// let request = RequestBuilder::new()
   ///  .method("POST")
-  ///  .build();
+  ///  .url("http://example.com/test.php").expect("invalid url")
+  ///  .build()
+  ///   .expect("should build request");
   ///
   /// assert_eq!(request.method(), "POST");
   /// ```
@@ -389,7 +414,8 @@ impl RequestBuilder {
   ///
   /// let request = RequestBuilder::new()
   ///   .url("http://example.com/test.php").expect("invalid url")
-  ///   .build();
+  ///   .build()
+  ///   .expect("should build request");
   ///
   /// assert_eq!(request.url().as_str(), "http://example.com/test.php");
   /// ```
@@ -402,7 +428,7 @@ impl RequestBuilder {
         self.url = Some(url);
         Ok(self)
       }
-      Err(e) => return Err(e),
+      Err(e) => Err(e),
     }
   }
 
@@ -414,17 +440,19 @@ impl RequestBuilder {
   /// use lang_handler::RequestBuilder;
   ///
   /// let request = RequestBuilder::new()
+  ///   .url("http://example.com/test.php").expect("invalid url")
   ///   .header("Accept", "text/html")
-  ///   .build();
+  ///   .build()
+  ///   .expect("should build request");
   ///
-  /// assert_eq!(request.headers().get("Accept"), Some(&vec!["text/html".to_string()]));
+  /// assert_eq!(request.headers().get("Accept"), Some("text/html".to_string()));
   /// ```
   pub fn header<K, V>(mut self, key: K, value: V) -> Self
   where
     K: Into<String>,
     V: Into<String>,
   {
-    self.headers.set(key.into(), value.into());
+    self.headers.add(key.into(), value.into());
     self
   }
 
@@ -436,8 +464,10 @@ impl RequestBuilder {
   /// use lang_handler::RequestBuilder;
   ///
   /// let request = RequestBuilder::new()
+  ///   .url("http://example.com/test.php").expect("invalid url")
   ///   .body("Hello, World!")
-  ///   .build();
+  ///   .build()
+  ///   .expect("should build request");
   ///
   /// assert_eq!(request.body(), "Hello, World!");
   /// ```
@@ -451,13 +481,19 @@ impl RequestBuilder {
   /// # Examples
   ///
   /// ```
+  /// use std::net::SocketAddr;
   /// use lang_handler::RequestBuilder;
   ///
   /// let request = RequestBuilder::new()
+  ///   .url("http://example.com/test.php").expect("invalid url")
   ///   .local_socket("127.0.0.1:8080").expect("invalid local socket")
-  ///   .build();
+  ///   .build()
+  ///   .expect("should build request");
   ///
-  /// assert_eq!(request.local_socket(), "127.0.0.1:8080");
+  /// let expected = "127.0.0.1:8080"
+  ///   .parse::<SocketAddr>()
+  ///   .expect("should parse");
+  /// assert_eq!(request.local_socket(), Some(expected));
   /// ```
   pub fn local_socket<T>(mut self, local_socket: T) -> Result<Self, AddrParseError>
   where
@@ -477,13 +513,19 @@ impl RequestBuilder {
   /// # Examples
   ///
   /// ```
+  /// use std::net::SocketAddr;
   /// use lang_handler::RequestBuilder;
   ///
   /// let request = RequestBuilder::new()
+  ///   .url("http://example.com/test.php").expect("invalid url")
   ///   .remote_socket("127.0.0.1:8080").expect("invalid remote socket")
-  ///   .build();
+  ///   .build()
+  ///   .expect("should build request");
   ///
-  /// assert_eq!(request.remote_socket(), "127.0.0.1:8080");
+  /// let expected = "127.0.0.1:8080"
+  ///   .parse::<SocketAddr>()
+  ///   .expect("should parse");
+  /// assert_eq!(request.remote_socket(), Some(expected));
   /// ```
   pub fn remote_socket<T>(mut self, remote_socket: T) -> Result<Self, AddrParseError>
   where
@@ -506,23 +548,28 @@ impl RequestBuilder {
   /// use lang_handler::RequestBuilder;
   ///
   /// let request = RequestBuilder::new()
-  ///   .build();
+  ///   .url("http://example.com/test.php").expect("invalid url")
+  ///   .build()
+  ///   .expect("should build request");
   ///
   /// assert_eq!(request.method(), "GET");
-  /// assert_eq!(request.url().as_str(), "http://example.com/");
+  /// assert_eq!(request.url().as_str(), "http://example.com/test.php");
   /// assert_eq!(request.body(), "");
   /// ```
-  pub fn build(self) -> Request {
-    Request {
+  pub fn build(self) -> Result<Request, RequestBuilderException> {
+    Ok(Request {
       method: self.method.unwrap_or_else(|| "GET".to_string()),
-      // TODO: This is wrong. Return a Result instead.
-      url: self
-        .url
-        .unwrap_or_else(|| Url::parse("http://example.com").unwrap()),
+      url: self.url.ok_or(RequestBuilderException::MissingUrl)?,
       headers: self.headers,
       body: self.body.freeze(),
       local_socket: self.local_socket,
       remote_socket: self.remote_socket,
-    }
+    })
+  }
+}
+
+impl Default for RequestBuilder {
+  fn default() -> Self {
+    Self::new()
   }
 }

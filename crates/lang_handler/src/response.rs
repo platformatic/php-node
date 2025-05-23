@@ -16,7 +16,7 @@ use crate::Headers;
 ///   .build();
 ///
 /// assert_eq!(response.status(), 200);
-/// assert_eq!(response.headers().get("Content-Type"), Some(&vec!["text/plain".to_string()]));
+/// assert_eq!(response.headers().get("Content-Type"), Some("text/plain".to_string()));
 /// assert_eq!(response.body(), "Hello, World!");
 /// ```
 #[derive(Clone, Debug)]
@@ -43,7 +43,7 @@ impl Response {
   /// let response = Response::new(200, headers, "Hello, World!", "log", Some("exception".to_string()));
   ///
   /// assert_eq!(response.status(), 200);
-  /// assert_eq!(response.headers().get("Content-Type"), Some(&vec!["text/plain".to_string()]));
+  /// assert_eq!(response.headers().get("Content-Type"), Some("text/plain".to_string()));
   /// assert_eq!(response.body(), "Hello, World!");
   /// assert_eq!(response.log(), "log");
   /// assert_eq!(response.exception(), Some(&"exception".to_string()));
@@ -82,7 +82,7 @@ impl Response {
   ///   .build();
   ///
   /// assert_eq!(response.status(), 200);
-  /// assert_eq!(response.headers().get("Content-Type"), Some(&vec!["text/plain".to_string()]));
+  /// assert_eq!(response.headers().get("Content-Type"), Some("text/plain".to_string()));
   /// assert_eq!(response.body(), "Hello, World!");
   /// ```
   pub fn builder() -> ResponseBuilder {
@@ -107,7 +107,7 @@ impl Response {
   ///   .build();
   ///
   /// assert_eq!(extended.status(), 201);
-  /// assert_eq!(extended.headers().get("Content-Type"), Some(&vec!["text/plain".to_string()]));
+  /// assert_eq!(extended.headers().get("Content-Type"), Some("text/plain".to_string()));
   /// assert_eq!(extended.body(), "Hello, World!");
   /// ```
   pub fn extend(&self) -> ResponseBuilder {
@@ -143,7 +143,7 @@ impl Response {
   ///   .header("Content-Type", "text/plain")
   ///   .build();
   ///
-  /// assert_eq!(response.headers().get("Content-Type"), Some(&vec!["text/plain".to_string()]));
+  /// assert_eq!(response.headers().get("Content-Type"), Some("text/plain".to_string()));
   /// ```
   pub fn headers(&self) -> &Headers {
     &self.headers
@@ -218,7 +218,7 @@ impl Response {
 ///   .build();
 ///
 /// assert_eq!(response.status(), 200);
-/// assert_eq!(response.headers().get("Content-Type"), Some(&vec!["text/plain".to_string()]));
+/// assert_eq!(response.headers().get("Content-Type"), Some("text/plain".to_string()));
 /// assert_eq!(response.body(), "Hello, World!");
 /// ```
 #[derive(Clone, Debug)]
@@ -268,7 +268,7 @@ impl ResponseBuilder {
   ///   .build();
   ///
   /// assert_eq!(extended.status(), 201);
-  /// assert_eq!(extended.headers().get("Content-Type"), Some(&vec!["text/plain".to_string()]));
+  /// assert_eq!(extended.headers().get("Content-Type"), Some("text/plain".to_string()));
   /// assert_eq!(extended.body(), "Hello, World!");
   /// ```
   pub fn extend(response: &Response) -> Self {
@@ -310,7 +310,7 @@ impl ResponseBuilder {
   ///   .header("Content-Type", "text/plain")
   ///   .build();
   ///
-  /// assert_eq!(response.headers().get("Content-Type"), Some(&vec!["text/plain".to_string()]));
+  /// assert_eq!(response.headers().get("Content-Type"), Some("text/plain".to_string()));
   /// ```
   pub fn header<K, V>(&mut self, key: K, value: V) -> &mut Self
   where
@@ -409,5 +409,11 @@ impl ResponseBuilder {
       log: self.log.clone().freeze(),
       exception: self.exception.clone(),
     }
+  }
+}
+
+impl Default for ResponseBuilder {
+  fn default() -> Self {
+    Self::new()
   }
 }

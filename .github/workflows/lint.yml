@@ -48,13 +48,11 @@ jobs:
       - name: Cargo fmt
         run: cargo fmt -- --check
 
-      # TODO: Clippy yells a lot. Need to clean things up before turning it on.
-
       # Clippy needs access to install ext-php-rs
-      # - name: Give GitHub Actions access to ext-php-rs
-      #   uses: webfactory/ssh-agent@v0.5.4
-      #   with:
-      #     ssh-private-key: ${{ secrets.SECRET_REPO_DEPLOY_KEY }}
+      - name: Give GitHub Actions access to ext-php-rs
+        uses: webfactory/ssh-agent@v0.5.4
+        with:
+          ssh-private-key: ${{ secrets.SECRET_REPO_DEPLOY_KEY }}
 
-      # - name: Clippy
-      #   run: cargo clippy
+      - name: Clippy
+        run: cargo clippy

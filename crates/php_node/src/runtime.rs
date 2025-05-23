@@ -51,15 +51,16 @@ impl PhpRuntime {
   /// });
   /// ```
   #[napi(constructor)]
-  pub fn new(options: PhpOptions) -> Self {
+  pub fn new(options: PhpOptions) -> Result<Self> {
     let docroot = options.docroot.clone();
     let argv = options.argv.clone();
 
-    let embed = Embed::new_with_argv(docroot, argv);
+    let embed =
+      Embed::new_with_argv(docroot, argv).map_err(|err| Error::from_reason(err.to_string()))?;
 
-    Self {
+    Ok(Self {
       embed: Arc::new(embed),
-    }
+    })
   }
 
   /// Handle a PHP request.

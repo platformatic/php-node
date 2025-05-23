@@ -7,11 +7,11 @@ export interface PhpRequestSocketOptions {
   /** The string representation of the local IP address the remote client is connecting on. */
   localAddress: string
   /** The numeric representation of the local port. For example, 80 or 21. */
-  localPort: string
+  localPort: number
   /** The string representation of the remote IP address. */
   remoteAddress: string
   /** The numeric representation of the remote port. For example, 80 or 21. */
-  remotePort: string
+  remotePort: number
 }
 /** Options for creating a new PHP request. */
 export interface PhpRequestOptions {

@@ -111,7 +111,9 @@ impl PhpRequest {
     }
 
     Ok(PhpRequest {
-      request: builder.build(),
+      request: builder
+        .build()
+        .map_err(|err| Error::from_reason(err.to_string()))?,
     })
   }
 
