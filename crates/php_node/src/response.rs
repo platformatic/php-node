@@ -9,9 +9,10 @@ use crate::PhpHeaders;
 
 /// Options for creating a new PHP response.
 #[napi(object)]
+#[derive(Default)]
 pub struct PhpResponseOptions {
   /// The HTTP status code for the response.
-  pub status: i32,
+  pub status: Option<i32>,
   /// The headers for the response.
   /// TODO: Figure out how to accept a Headers instance
   /// TODO: Figure out how to support both single values without array wrap
@@ -53,9 +54,13 @@ impl PhpResponse {
   /// });
   /// ```
   #[napi(constructor)]
-  pub fn constructor(options: PhpResponseOptions) -> Result<Self> {
+  pub fn constructor(options: Option<PhpResponseOptions>) -> Result<Self> {
+    let options = options.unwrap_or_default();
     let mut builder = Response::builder();
-    builder.status(options.status);
+
+    if let Some(status) = options.status {
+      builder.status(status);
+    }
 
     if let Some(headers) = options.headers {
       for key in headers.keys() {

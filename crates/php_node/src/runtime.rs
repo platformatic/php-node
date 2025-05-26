@@ -12,9 +12,9 @@ use crate::{PhpRequest, PhpResponse};
 #[derive(Clone, Default)]
 pub struct PhpOptions {
   /// The command-line arguments for the PHP instance.
-  pub argv: Vec<String>,
+  pub argv: Option<Vec<String>>,
   /// The document root for the PHP instance.
-  pub docroot: String,
+  pub docroot: Option<String>,
 }
 
 /// A PHP instance.
@@ -47,16 +47,27 @@ impl PhpRuntime {
   ///
   /// ```js
   /// const php = new Php({
-  ///   code: 'echo "Hello, world!";'
+  ///   docroot: process.cwd(),
+  ///   argv: process.argv
   /// });
   /// ```
   #[napi(constructor)]
-  pub fn new(options: PhpOptions) -> Result<Self> {
-    let docroot = options.docroot.clone();
-    let argv = options.argv.clone();
+  pub fn new(options: Option<PhpOptions>) -> Result<Self> {
+    let PhpOptions { docroot, argv } = options.unwrap_or_default();
 
-    let embed =
-      Embed::new_with_argv(docroot, argv).map_err(|err| Error::from_reason(err.to_string()))?;
+    let docroot = docroot
+      .ok_or_else(|| {
+        std::env::current_dir()
+          .map(|s| s.display().to_string())
+          .ok()
+      })
+      .map_err(|_| Error::from_reason("Could not determine docroot"))?;
+
+    let embed = match argv {
+      Some(argv) => Embed::new_with_argv(docroot, argv),
+      None => Embed::new(docroot),
+    }
+    .map_err(|err| Error::from_reason(err.to_string()))?;
 
     Ok(Self {
       embed: Arc::new(embed),
@@ -69,7 +80,8 @@ impl PhpRuntime {
   ///
   /// ```js
   /// const php = new Php({
-  ///  code: 'echo "Hello, world!";'
+  ///   docroot: process.cwd(),
+  ///   argv: process.argv
   /// });
   ///
   /// const response = php.handleRequest(new Request({
@@ -94,7 +106,8 @@ impl PhpRuntime {
   ///
   /// ```js
   /// const php = new Php({
-  ///   code: 'echo "Hello, world!";'
+  ///   docroot: process.cwd(),
+  ///   argv: process.argv
   /// });
   ///
   /// const response = php.handleRequestSync(new Request({

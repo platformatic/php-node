@@ -16,7 +16,7 @@ export interface PhpRequestSocketOptions {
 /** Options for creating a new PHP request. */
 export interface PhpRequestOptions {
   /** The HTTP method for the request. */
-  method: string
+  method?: string
   /** The URL for the request. */
   url: string
   /**
@@ -33,7 +33,7 @@ export interface PhpRequestOptions {
 /** Options for creating a new PHP response. */
 export interface PhpResponseOptions {
   /** The HTTP status code for the response. */
-  status: number
+  status?: number
   /**
    * The headers for the response.
    * TODO: Figure out how to accept a Headers instance
@@ -50,9 +50,9 @@ export interface PhpResponseOptions {
 /** Options for creating a new PHP instance. */
 export interface PhpOptions {
   /** The command-line arguments for the PHP instance. */
-  argv: Array<string>
+  argv?: Array<string>
   /** The document root for the PHP instance. */
-  docroot: string
+  docroot?: string
 }
 export type PhpHeaders = Headers
 /**
@@ -215,8 +215,8 @@ export declare class Headers {
    * headers.set('Content-Type', 'application/json');
    * headers.set('Accept', 'application/json');
    *
-   * for (const [key, values] of headers.entries()) {
-   *   console.log(`${key}: ${values.join(', ')}`);
+   * for (const [name, value] of headers.entries()) {
+   *   console.log(`${name}: ${value}`);
    * }
    * ```
    */
@@ -231,8 +231,8 @@ export declare class Headers {
    * headers.set('Content-Type', 'application/json');
    * headers.set('Accept', 'application/json');
    *
-   * for (const key of headers.keys()) {
-   *   console.log(key);
+   * for (const name of headers.keys()) {
+   *   console.log(name);
    * }
    * ```
    */
@@ -263,12 +263,12 @@ export declare class Headers {
    * headers.set('Content-Type', 'application/json');
    * headers.set('Accept', 'application/json');
    *
-   * headers.forEach(([key, values]) => {
-   *   console.log(`${key}: ${values.join(', ')}`);
+   * headers.forEach((value, name, headers) => {
+   *   console.log(`${name}: ${value}`);
    * });
    * ```
    */
-  forEach(this: this, callback: (arg0: Array<string>, arg1: string, arg2: this) => void): void
+  forEach(this: this, callback: (arg0: string, arg1: string, arg2: this) => void): void
 }
 export type PhpRequest = Request
 /**
@@ -488,11 +488,12 @@ export declare class Php {
    *
    * ```js
    * const php = new Php({
-   *   code: 'echo "Hello, world!";'
+   *   docroot: process.cwd(),
+   *   argv: process.argv
    * });
    * ```
    */
-  constructor(options: PhpOptions)
+  constructor(options?: PhpOptions | undefined | null)
   /**
    * Handle a PHP request.
    *
@@ -500,7 +501,8 @@ export declare class Php {
    *
    * ```js
    * const php = new Php({
-   *  code: 'echo "Hello, world!";'
+   *   docroot: process.cwd(),
+   *   argv: process.argv
    * });
    *
    * const response = php.handleRequest(new Request({
@@ -520,7 +522,8 @@ export declare class Php {
    *
    * ```js
    * const php = new Php({
-   *   code: 'echo "Hello, world!";'
+   *   docroot: process.cwd(),
+   *   argv: process.argv
    * });
    *
    * const response = php.handleRequestSync(new Request({
