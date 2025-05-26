@@ -384,7 +384,7 @@ export declare class Response {
    * });
    * ```
    */
-  constructor(options: PhpResponseOptions)
+  constructor(options?: PhpResponseOptions | undefined | null)
   /**
    * Get the HTTP status code for the response.
    *

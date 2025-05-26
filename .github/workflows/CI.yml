@@ -486,15 +486,15 @@ jobs:
         run: ls -R ./npm
         shell: bash
       - name: Publish
-        if: contains(github.ref, "main")
+        if: ${{ contains(github.ref, 'main') }}
         run: |
           npm config set //registry.npmjs.org/:_authToken=$NPM_TOKEN
           npm config set scope "@platformatic"
-          npm config set provenance true
-          if git log -1 --pretty=%B | grep "^v?[0-9]\+\.[0-9]\+\.[0-9]\+$";
+          # npm config set provenance true
+          if git log -1 --pretty=%B | grep "^v\?[0-9]\+\.[0-9]\+\.[0-9]\+";
           then
             npm publish --access public
-          elif git log -1 --pretty=%B | grep "^v?[0-9]\+\.[0-9]\+\.[0-9]\+";
+          elif git log -1 --pretty=%B | grep "^v\?[0-9]\+\.[0-9]\+\.[0-9]\+-\.+";
           then
             npm publish --tag next --access public
           else
