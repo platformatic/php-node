@@ -2,6 +2,7 @@ use std::{
   env::Args,
   ffi::c_char,
   path::{Path, PathBuf},
+  sync::Arc,
 };
 
 use ext_php_rs::{
@@ -25,6 +26,14 @@ use crate::{
 #[derive(Debug)]
 pub struct Embed {
   docroot: PathBuf,
+
+  // TODO: Do something with this...
+  #[allow(dead_code)]
+  args: Vec<String>,
+
+  // NOTE: This needs to hold the SAPI to keep it alive
+  #[allow(dead_code)]
+  sapi: Arc<Sapi>,
 }
 
 // An embed instance may be constructed on the main thread and then shared
@@ -90,14 +99,16 @@ impl Embed {
     C: AsRef<Path>,
     S: AsRef<str> + std::fmt::Debug,
   {
-    ensure_sapi(argv)?;
-
     let docroot = docroot
       .as_ref()
       .canonicalize()
       .map_err(|_| EmbedException::DocRootNotFound(docroot.as_ref().display().to_string()))?;
 
-    Ok(Embed { docroot })
+    Ok(Embed {
+      docroot,
+      args: argv.iter().map(|v| v.as_ref().to_string()).collect(),
+      sapi: ensure_sapi()?,
+    })
   }
 
   /// Get the docroot used for this Embed instance
@@ -152,12 +163,8 @@ impl Handler for Embed {
   /// //assert_eq!(response.body(), "Hello, world!");
   /// ```
   fn handle(&self, request: Request) -> Result<Response, Self::Error> {
-    unsafe {
-      ext_php_rs::embed::ext_php_rs_sapi_per_thread_init();
-    }
-
     // Initialize the SAPI module
-    Sapi::startup()?;
+    self.sapi.startup()?;
 
     let url = request.url();
 
