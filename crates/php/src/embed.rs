@@ -141,7 +141,7 @@ impl Handler for Embed {
   ///
   /// let request = Request::builder()
   ///   .method("GET")
-  ///   .url("http://example.com").expect("invalid url")
+  ///   .url("http://example.com")
   ///   .build()
   ///   .expect("should build request");
   ///

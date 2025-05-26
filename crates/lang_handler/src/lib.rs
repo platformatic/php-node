@@ -4,6 +4,7 @@ mod handler;
 mod headers;
 mod request;
 mod response;
+pub mod rewrite;
 
 #[cfg(feature = "c")]
 pub use ffi::*;

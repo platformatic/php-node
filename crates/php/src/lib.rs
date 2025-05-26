@@ -8,7 +8,7 @@ mod sapi;
 mod scopes;
 mod strings;
 
-pub use lang_handler::{Handler, Header, Headers, Request, RequestBuilder, Response, Url};
+pub use lang_handler::{rewrite, Handler, Header, Headers, Request, RequestBuilder, Response, Url};
 
 pub use embed::Embed;
 pub use exception::EmbedException;

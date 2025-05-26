@@ -54,7 +54,7 @@ pub struct PhpRequestOptions {
 /// ```
 #[napi(js_name = "Request")]
 pub struct PhpRequest {
-  request: Request,
+  pub(crate) request: Request,
 }
 
 // Future ideas:
@@ -78,10 +78,7 @@ impl PhpRequest {
   /// ```
   #[napi(constructor)]
   pub fn constructor(options: PhpRequestOptions) -> Result<Self> {
-    let mut builder: RequestBuilder = Request::builder()
-      .method(options.method)
-      .url(&options.url)
-      .map_err(|_| Error::from_reason(format!("Invalid URL \"{}\"", options.url)))?;
+    let mut builder: RequestBuilder = Request::builder().method(options.method).url(&options.url);
 
     if let Some(socket) = options.socket {
       let local_socket = format!("{}:{}", socket.local_address, socket.local_port);
@@ -89,9 +86,7 @@ impl PhpRequest {
 
       builder = builder
         .local_socket(&local_socket)
-        .map_err(|_| Error::from_reason(format!("Invalid local socket \"{}\"", local_socket)))?
-        .remote_socket(&remote_socket)
-        .map_err(|_| Error::from_reason(format!("Invalid remote socket \"{}\"", remote_socket)))?;
+        .remote_socket(&remote_socket);
     }
 
     if let Some(headers) = options.headers {
