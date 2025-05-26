@@ -196,6 +196,7 @@ Cargo.lock
 
 *.node
 *.dylib
+*.so
 
 # Added by static-php-cli
 crates/php/buildroot

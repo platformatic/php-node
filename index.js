@@ -26,7 +26,7 @@ function getNativeBinding({ platform, arch }) {
     name += '-msvc'
   }
 
-  const path = process.env.TEST
+  const path = process.env.PHP_NODE_TEST
     ? `./php.${name}.node`
     : `./npm/${name}/binding.node`
 
