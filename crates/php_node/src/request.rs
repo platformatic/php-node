@@ -25,7 +25,7 @@ pub struct PhpRequestSocketOptions {
 #[derive(Default)]
 pub struct PhpRequestOptions {
   /// The HTTP method for the request.
-  pub method: String,
+  pub method: Option<String>,
   /// The URL for the request.
   pub url: String,
   /// The headers for the request.
@@ -79,9 +79,12 @@ impl PhpRequest {
   #[napi(constructor)]
   pub fn constructor(options: PhpRequestOptions) -> Result<Self> {
     let mut builder: RequestBuilder = Request::builder()
-      .method(options.method)
       .url(&options.url)
       .map_err(|_| Error::from_reason(format!("Invalid URL \"{}\"", options.url)))?;
+
+    if let Some(method) = options.method {
+      builder = builder.method(method)
+    }
 
     if let Some(socket) = options.socket {
       let local_socket = format!("{}:{}", socket.local_address, socket.local_port);

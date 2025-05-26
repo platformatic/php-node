@@ -236,23 +236,21 @@ impl PhpHeaders {
   /// headers.set('Content-Type', 'application/json');
   /// headers.set('Accept', 'application/json');
   ///
-  /// for (const [key, values] of headers.entries()) {
-  ///   console.log(`${key}: ${values.join(', ')}`);
+  /// for (const [name, value] of headers.entries()) {
+  ///   console.log(`${name}: ${value}`);
   /// }
   /// ```
   #[napi]
-  pub fn entries(&self) -> Vec<Entry<String, Vec<String>>> {
+  pub fn entries(&self) -> Vec<Entry<String, String>> {
     self
       .headers
       .iter()
-      .map(|(k, v)| {
-        Entry(
-          k.to_owned(),
-          match v {
-            Header::Single(value) => vec![value.clone()],
-            Header::Multiple(vec) => vec.clone(),
-          },
-        )
+      .flat_map(|(k, v)| match v {
+        Header::Single(value) => vec![Entry(k.to_owned(), value.clone())],
+        Header::Multiple(vec) => vec
+          .iter()
+          .map(|value| Entry(k.to_owned(), value.clone()))
+          .collect::<Vec<Entry<String, String>>>(),
       })
       .collect()
   }
@@ -266,8 +264,8 @@ impl PhpHeaders {
   /// headers.set('Content-Type', 'application/json');
   /// headers.set('Accept', 'application/json');
   ///
-  /// for (const key of headers.keys()) {
-  ///   console.log(key);
+  /// for (const name of headers.keys()) {
+  ///   console.log(name);
   /// }
   /// ```
   #[napi]
@@ -290,11 +288,7 @@ impl PhpHeaders {
   /// ```
   #[napi]
   pub fn values(&self) -> Vec<String> {
-    self
-      .entries()
-      .into_iter()
-      .flat_map(|entry| entry.1)
-      .collect()
+    self.entries().into_iter().map(|entry| entry.1).collect()
   }
 
   /// Execute a callback for each header entry.
@@ -306,18 +300,17 @@ impl PhpHeaders {
   /// headers.set('Content-Type', 'application/json');
   /// headers.set('Accept', 'application/json');
   ///
-  /// headers.forEach(([key, values]) => {
-  ///   console.log(`${key}: ${values.join(', ')}`);
+  /// headers.forEach((value, name, headers) => {
+  ///   console.log(`${name}: ${value}`);
   /// });
   /// ```
   #[napi]
-  pub fn for_each<F: Fn(Vec<String>, String, &This) -> Result<()>>(
+  pub fn for_each<F: Fn(String, String, &This) -> Result<()>>(
     &self,
     this: This,
     callback: F,
   ) -> Result<()> {
     for entry in self.entries() {
-      let entry = Entry(entry.0, entry.1);
       callback(entry.1, entry.0, &this)?;
     }
     Ok(())
