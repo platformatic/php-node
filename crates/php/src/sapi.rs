@@ -214,7 +214,7 @@ pub extern "C" fn sapi_module_deactivate() -> c_int {
 }
 
 #[no_mangle]
-pub extern "C" fn sapi_module_ub_write(str: *const i8, str_length: usize) -> usize {
+pub extern "C" fn sapi_module_ub_write(str: *const c_char, str_length: usize) -> usize {
   if str.is_null() || str_length == 0 {
     return 0;
   }
