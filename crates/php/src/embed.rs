@@ -1,8 +1,7 @@
 use std::{
   env::Args,
-  ffi::{c_char, CString},
+  ffi::c_char,
   path::{Path, PathBuf},
-  sync::Arc,
 };
 
 use ext_php_rs::{
@@ -26,14 +25,6 @@ use crate::{
 #[derive(Debug)]
 pub struct Embed {
   docroot: PathBuf,
-
-  // TODO: Do something with this...
-  #[allow(dead_code)]
-  args: Vec<String>,
-
-  // NOTE: This needs to hold the SAPI to keep it alive
-  #[allow(dead_code)]
-  sapi: Arc<Sapi>,
 }
 
 // An embed instance may be constructed on the main thread and then shared
@@ -99,16 +90,14 @@ impl Embed {
     C: AsRef<Path>,
     S: AsRef<str> + std::fmt::Debug,
   {
+    ensure_sapi(argv)?;
+
     let docroot = docroot
       .as_ref()
       .canonicalize()
       .map_err(|_| EmbedException::DocRootNotFound(docroot.as_ref().display().to_string()))?;
 
-    Ok(Embed {
-      docroot,
-      args: argv.iter().map(|v| v.as_ref().to_string()).collect(),
-      sapi: ensure_sapi()?,
-    })
+    Ok(Embed { docroot })
   }
 
   /// Get the docroot used for this Embed instance
@@ -163,8 +152,12 @@ impl Handler for Embed {
   /// //assert_eq!(response.body(), "Hello, world!");
   /// ```
   fn handle(&self, request: Request) -> Result<Response, Self::Error> {
+    unsafe {
+      ext_php_rs::embed::ext_php_rs_sapi_per_thread_init();
+    }
+
     // Initialize the SAPI module
-    self.sapi.startup()?;
+    Sapi::startup()?;
 
     let url = request.url();
 
@@ -188,14 +181,6 @@ impl Handler for Embed {
       .map(|v| v.parse::<i64>().unwrap_or(0))
       .unwrap_or(0);
     let cookie_data = nullable_cstr(headers.get("Cookie"))?;
-
-    let argc = self.args.len() as i32;
-    let mut argv_ptrs = vec![];
-    for arg in self.args.iter() {
-      let string = CString::new(arg.as_bytes())
-        .map_err(|_| EmbedException::CStringEncodeFailed(arg.to_owned()))?;
-      argv_ptrs.push(string.into_raw());
-    }
 
     // Prepare memory stream of the code
     let mut file_handle = unsafe {
@@ -229,8 +214,8 @@ impl Handler for Embed {
 
         // Reset state
         globals.request_info.proto_num = 110;
-        globals.request_info.argc = argc;
-        globals.request_info.argv = argv_ptrs.as_mut_ptr();
+        globals.request_info.argc = 0;
+        globals.request_info.argv = std::ptr::null_mut();
         globals.request_info.headers_read = false;
         globals.sapi_headers.http_response_code = 200;
 
