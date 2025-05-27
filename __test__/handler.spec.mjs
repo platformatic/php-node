@@ -15,11 +15,12 @@ test('Support input/output streams', async (t) => {
   t.teardown(() => mockroot.clean())
 
   const php = new Php({
+    argv: process.argv,
     docroot: mockroot.path
   })
 
   const req = new Request({
-    method: 'POST',
+    method: 'GET',
     url: 'http://example.com/index.php',
     body: Buffer.from('Hello, from Node.js!')
   })
@@ -38,10 +39,12 @@ test('Capture logs', async (t) => {
   t.teardown(() => mockroot.clean())
 
   const php = new Php({
+    argv: process.argv,
     docroot: mockroot.path
   })
 
   const req = new Request({
+    method: 'GET',
     url: 'http://example.com/index.php'
   })
 
@@ -59,10 +62,12 @@ test('Capture exceptions', async (t) => {
   t.teardown(() => mockroot.clean())
 
   const php = new Php({
+    argv: process.argv,
     docroot: mockroot.path
   })
 
   const req = new Request({
+    method: 'GET',
     url: 'http://example.com/index.php'
   })
 
@@ -84,10 +89,12 @@ test('Support request and response headers', async (t) => {
   t.teardown(() => mockroot.clean())
 
   const php = new Php({
+    argv: process.argv,
     docroot: mockroot.path
   })
 
   const req = new Request({
+    method: 'GET',
     url: 'http://example.com/index.php',
     headers: {
       'X-Test': ['Hello, from Node.js!']
@@ -98,34 +105,4 @@ test('Support request and response headers', async (t) => {
   t.is(res.status, 200)
   t.is(res.body.toString(), 'Hello, from Node.js!')
   t.is(res.headers.get('X-Test'), 'Hello, from PHP!')
-})
-
-test('Has expected args', async (t) => {
-  const mockroot = await MockRoot.from({
-    'index.php': `<?php
-      echo "[";
-      $first = true;
-      foreach ($argv as $value) {
-        if ($first) { $first = false; }
-        else { echo ","; }
-        echo "\\"$value\\"";
-      }
-      echo "]";
-    ?>`
-  })
-  t.teardown(() => mockroot.clean())
-
-  const php = new Php({
-    argv: process.argv,
-    docroot: mockroot.path
-  })
-
-  const req = new Request({
-    url: 'http://example.com/index.php'
-  })
-
-  const res = await php.handleRequest(req)
-  t.is(res.status, 200)
-
-  t.is(res.body.toString('utf8'), JSON.stringify(process.argv))
 })

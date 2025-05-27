@@ -58,7 +58,6 @@ console.log(response.body.toString())
 ### `new Php(config)`
 
 * `config` {Object} Configuration object
-  * `argv` {String[]} Process arguments. **Default:** []
   * `docroot` {String} Document root for PHP. **Default:** process.cwd()
 * Returns: {Php}
 
@@ -68,7 +67,6 @@ Construct a new PHP instance to which to dispatch requests.
 import { Php } from '@platformatic/php-node'
 
 const php = new Php({
-  argv: process.argv,
   docroot: process.cwd()
 })
 ````
