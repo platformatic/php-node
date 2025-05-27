@@ -2,7 +2,7 @@ use std::{
   collections::HashMap,
   env::current_exe,
   ffi::{c_char, c_int, c_void, CStr},
-  sync::RwLock,
+  sync::{Arc, RwLock, Weak},
 };
 
 use bytes::Buf;
@@ -12,9 +12,9 @@ use ext_php_rs::{
   embed::SapiModule,
   exception::register_error_observer,
   ffi::{
-    ext_php_rs_sapi_shutdown, ext_php_rs_sapi_startup, php_module_shutdown, php_module_startup,
-    php_register_variable, sapi_send_headers, sapi_shutdown, sapi_startup,
-    ZEND_RESULT_CODE_SUCCESS,
+    ext_php_rs_sapi_per_thread_init, ext_php_rs_sapi_shutdown, ext_php_rs_sapi_startup,
+    php_module_shutdown, php_module_startup, php_register_variable, sapi_send_headers,
+    sapi_shutdown, sapi_startup, ZEND_RESULT_CODE_SUCCESS,
   },
   prelude::*,
   zend::{SapiGlobals, SapiHeader},
@@ -23,30 +23,21 @@ use ext_php_rs::{
 use once_cell::sync::OnceCell;
 
 use crate::{
-  strings::{cstr, maybe_current_dir},
+  strings::{cstr, drop_str, maybe_current_dir},
   EmbedException, RequestContext,
 };
 use lang_handler::Header;
 
 // This is a helper to ensure that PHP is initialized and deinitialized at the
 // appropriate times.
-pub(crate) struct Sapi(Box<SapiModule>);
+#[derive(Debug)]
+pub(crate) struct Sapi(RwLock<Box<SapiModule>>);
 
 impl Sapi {
-  pub fn new<S>(argv: Vec<S>) -> Result<Self, EmbedException>
-  where
-    S: AsRef<str>,
-  {
-    let argv: Vec<&str> = argv.iter().map(|s| s.as_ref()).collect();
-    // let argc = argv.len() as i32;
-    // let mut argv_ptrs = argv
-    //     .iter()
-    //     .map(|v| v.as_ptr() as *mut c_char)
-    //     .collect::<Vec<*mut c_char>>();
-
+  pub fn new() -> Result<Self, EmbedException> {
     let mut sapi = SapiBuilder::new("php_lang_handler", "PHP Lang Handler")
       .startup_function(sapi_module_startup)
-      // .shutdown_function(sapi_module_shutdown)
+      .shutdown_function(sapi_module_shutdown)
       // .activate_function(sapi_module_activate)
       .deactivate_function(sapi_module_deactivate)
       .ub_write_function(sapi_module_ub_write)
@@ -66,20 +57,20 @@ impl Sapi {
     sapi.additional_functions = std::ptr::null();
     // sapi.phpinfo_as_text = 1;
 
-    let exe_loc = argv
-      .first()
-      .map(|s| s.to_string())
-      .or_else(|| current_exe().ok().map(|p| p.display().to_string()))
-      .ok_or(EmbedException::FailedToFindExeLocation)?;
+    let exe_loc = current_exe()
+      .map(|p| p.display().to_string())
+      .map_err(|_| EmbedException::FailedToFindExeLocation)?;
 
     sapi.executable_location = cstr(exe_loc)?;
     let mut boxed = Box::new(sapi);
 
     unsafe {
       ext_php_rs_sapi_startup();
-
       sapi_startup(boxed.as_mut());
-      php_module_startup(boxed.as_mut(), get_module());
+
+      if let Some(startup) = boxed.startup {
+        startup(boxed.as_mut());
+      }
     }
 
     // TODO: Should maybe capture this to store in EmbedException rather than
@@ -94,54 +85,61 @@ impl Sapi {
             ctx.response_builder().exception(*msg);
           }
         })
+        // TODO: Report this error somehow?
         .ok();
     });
 
-    Ok(Sapi(boxed))
+    Ok(Sapi(RwLock::new(boxed)))
   }
 
-  fn do_startup(&mut self) -> Result<(), EmbedException> {
-    let sapi = self.0.as_mut();
-    let startup = sapi
-      .startup
-      .ok_or(EmbedException::SapiMissingStartupFunction)?;
-    if unsafe { startup(sapi) } != ZEND_RESULT_CODE_SUCCESS {
-      return Err(EmbedException::SapiNotStarted);
+  pub fn startup<'a>(&'a self) -> Result<(), EmbedException> {
+    unsafe {
+      ext_php_rs_sapi_per_thread_init();
     }
+
+    let rwlock = &self.0;
+    let sapi = rwlock.read().map_err(|_| EmbedException::SapiLockFailed)?;
+
+    if let Some(startup) = sapi.startup {
+      if unsafe { startup(sapi.into_raw()) } != ZEND_RESULT_CODE_SUCCESS {
+        return Err(EmbedException::SapiNotStarted);
+      }
+    }
+
     Ok(())
-  }
-
-  pub fn startup() -> Result<(), EmbedException> {
-    SAPI_INIT
-      .get()
-      .ok_or(EmbedException::SapiNotInitialized)
-      .and_then(|rwlock| {
-        let mut sapi = rwlock.write().map_err(|_| EmbedException::SapiLockFailed)?;
-
-        sapi.do_startup()?;
-        Ok(())
-      })
   }
 }
 
 impl Drop for Sapi {
   fn drop(&mut self) {
     unsafe {
-      php_module_shutdown();
       sapi_shutdown();
-
       ext_php_rs_sapi_shutdown();
     }
   }
 }
 
-pub(crate) static SAPI_INIT: OnceCell<RwLock<Sapi>> = OnceCell::new();
+pub(crate) static SAPI_INIT: OnceCell<RwLock<Weak<Sapi>>> = OnceCell::new();
 
-pub fn ensure_sapi<S>(argv: Vec<S>) -> Result<&'static RwLock<Sapi>, EmbedException>
-where
-  S: AsRef<str> + std::fmt::Debug,
-{
-  SAPI_INIT.get_or_try_init(|| Sapi::new(argv).map(RwLock::new))
+pub fn ensure_sapi() -> Result<Arc<Sapi>, EmbedException> {
+  let weak_sapi = SAPI_INIT.get_or_try_init(|| Ok(RwLock::new(Weak::new())))?;
+
+  if let Some(sapi) = weak_sapi
+    .read()
+    .map_err(|_| EmbedException::SapiLockFailed)?
+    .upgrade()
+  {
+    return Ok(sapi);
+  }
+
+  let mut rwlock = weak_sapi
+    .write()
+    .map_err(|_| EmbedException::SapiLockFailed)?;
+
+  let sapi = Sapi::new().map(Arc::new)?;
+  *rwlock = Arc::downgrade(&sapi);
+
+  Ok(sapi)
 }
 
 //
@@ -166,15 +164,17 @@ static HARDCODED_INI: &str = "
 ";
 
 #[no_mangle]
-pub extern "C" fn sapi_cli_ini_defaults(configuration_hash: *mut ext_php_rs::types::ZendHashTable) {
-  let hash = unsafe { &mut *configuration_hash };
+pub extern "C" fn sapi_cli_ini_defaults(ht: *mut ext_php_rs::types::ZendHashTable) {
+  let config = unsafe { &mut *ht };
 
-  let config = str::trim(HARDCODED_INI).lines().map(str::trim);
+  let ini_lines = str::trim(HARDCODED_INI).lines().map(str::trim);
 
-  for line in config {
+  for line in ini_lines {
     if let Some((key, value)) = line.split_once('=') {
+      use ext_php_rs::convert::IntoZval;
+      let value = value.into_zval(true).unwrap();
       // TODO: Capture error somehow?
-      hash.insert(key, value).ok();
+      config.insert(key, value).ok();
     }
   }
 }
@@ -187,30 +187,44 @@ pub extern "C" fn sapi_module_startup(
 }
 
 #[no_mangle]
+pub extern "C" fn sapi_module_shutdown(
+  _sapi_module: *mut SapiModule,
+) -> ext_php_rs::ffi::zend_result {
+  unsafe {
+    php_module_shutdown();
+  }
+  ZEND_RESULT_CODE_SUCCESS
+}
+
+#[no_mangle]
 pub extern "C" fn sapi_module_deactivate() -> c_int {
   {
     let mut globals = SapiGlobals::get_mut();
+
+    for i in 0..globals.request_info.argc {
+      drop_str(unsafe { *globals.request_info.argv.offset(i as isize) });
+    }
 
     globals.server_context = std::ptr::null_mut();
     globals.request_info.argc = 0;
     globals.request_info.argv = std::ptr::null_mut();
 
-    // drop_str(globals.request_info.request_method);
-    // drop_str(globals.request_info.query_string);
-    // drop_str(globals.request_info.request_uri);
-    // drop_str(globals.request_info.path_translated);
-    // drop_str(globals.request_info.content_type);
-    // drop_str(globals.request_info.cookie_data);
+    drop_str(globals.request_info.request_method);
+    drop_str(globals.request_info.query_string);
+    drop_str(globals.request_info.request_uri);
+    drop_str(globals.request_info.path_translated);
+    drop_str(globals.request_info.content_type);
+    drop_str(globals.request_info.cookie_data);
     // drop_str(globals.request_info.php_self);
-    // drop_str(globals.request_info.auth_user);
-    // drop_str(globals.request_info.auth_password);
-    // drop_str(globals.request_info.auth_digest);
+    drop_str(globals.request_info.auth_user);
+    drop_str(globals.request_info.auth_password);
+    drop_str(globals.request_info.auth_digest);
   }
 
   // TODO: When _is_ it safe to reclaim the request context?
-  // RequestContext::reclaim();
+  RequestContext::reclaim();
 
-  0
+  ZEND_RESULT_CODE_SUCCESS
 }
 
 #[no_mangle]
@@ -356,7 +370,11 @@ pub extern "C" fn sapi_module_register_server_variables(vars: *mut ext_php_rs::t
           sapi
             .read()
             .map_err(|_| EmbedException::SapiLockFailed)?
+            .upgrade()
+            .ok_or(EmbedException::SapiLockFailed)?
             .0
+            .read()
+            .map_err(|_| EmbedException::SapiLockFailed)?
             .name,
           vars,
         );
