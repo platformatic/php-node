@@ -201,6 +201,10 @@ pub extern "C" fn sapi_module_deactivate() -> c_int {
   {
     let mut globals = SapiGlobals::get_mut();
 
+    for i in 0..globals.request_info.argc {
+      drop_str(unsafe { *globals.request_info.argv.offset(i as isize) });
+    }
+
     globals.server_context = std::ptr::null_mut();
     globals.request_info.argc = 0;
     globals.request_info.argv = std::ptr::null_mut();

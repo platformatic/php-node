@@ -1,6 +1,6 @@
 use std::{
   env::Args,
-  ffi::c_char,
+  ffi::{c_char, CString},
   path::{Path, PathBuf},
   sync::Arc,
 };
@@ -189,6 +189,14 @@ impl Handler for Embed {
       .unwrap_or(0);
     let cookie_data = nullable_cstr(headers.get("Cookie"))?;
 
+    let argc = self.args.len() as i32;
+    let mut argv_ptrs = vec![];
+    for arg in self.args.iter() {
+      let string = CString::new(arg.as_bytes())
+        .map_err(|_| EmbedException::CStringEncodeFailed(arg.to_owned()))?;
+      argv_ptrs.push(string.into_raw());
+    }
+
     // Prepare memory stream of the code
     let mut file_handle = unsafe {
       let mut file_handle = zend_file_handle {
@@ -221,8 +229,8 @@ impl Handler for Embed {
 
         // Reset state
         globals.request_info.proto_num = 110;
-        globals.request_info.argc = 0;
-        globals.request_info.argv = std::ptr::null_mut();
+        globals.request_info.argc = argc;
+        globals.request_info.argv = argv_ptrs.as_mut_ptr();
         globals.request_info.headers_read = false;
         globals.sapi_headers.http_response_code = 200;
 
