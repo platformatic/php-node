@@ -13,7 +13,9 @@ rustfmt.toml
 pnpm-lock.yaml
 *.node
 *.dylib
+*.so
 !npm/**/*.node
 !npm/**/*.dylib
+!npm/**/*.so
 __test__
 renovate.json

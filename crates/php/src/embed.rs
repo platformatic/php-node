@@ -1,30 +1,35 @@
 use std::{
   env::Args,
-  ffi::c_char,
+  ffi::CString,
+  ops::DerefMut,
   path::{Path, PathBuf},
+  sync::Arc,
 };
 
 use ext_php_rs::{
   error::Error,
-  ffi::{
-    _zend_file_handle__bindgen_ty_1, php_execute_script, sapi_get_default_content_type,
-    zend_file_handle, zend_stream_init_filename,
-  },
+  ffi::{php_execute_script, php_module_shutdown, sapi_get_default_content_type},
   zend::{try_catch, try_catch_first, ExecutorGlobals, SapiGlobals},
 };
 
 use lang_handler::{Handler, Request, Response};
 
-use crate::{
-  sapi::ensure_sapi,
+use super::{
+  sapi::{ensure_sapi, Sapi},
+  scopes::{FileHandleScope, RequestScope},
   strings::{cstr, nullable_cstr, str_from_cstr, translate_path},
-  EmbedException, RequestContext, RequestScope, Sapi,
+  EmbedException, RequestContext,
 };
 
 /// Embed a PHP script into a Rust application to handle HTTP requests.
 #[derive(Debug)]
 pub struct Embed {
   docroot: PathBuf,
+  args: Vec<String>,
+
+  // NOTE: This needs to hold the SAPI to keep it alive
+  #[allow(dead_code)]
+  sapi: Arc<Sapi>,
 }
 
 // An embed instance may be constructed on the main thread and then shared
@@ -90,14 +95,16 @@ impl Embed {
     C: AsRef<Path>,
     S: AsRef<str> + std::fmt::Debug,
   {
-    ensure_sapi(argv)?;
-
-    let docroot = docroot
-      .as_ref()
+    let docroot_path = docroot.as_ref();
+    let docroot = docroot_path
       .canonicalize()
-      .map_err(|_| EmbedException::DocRootNotFound(docroot.as_ref().display().to_string()))?;
+      .map_err(|_| EmbedException::DocRootNotFound(docroot_path.display().to_string()))?;
 
-    Ok(Embed { docroot })
+    Ok(Embed {
+      docroot,
+      args: argv.iter().map(|v| v.as_ref().to_string()).collect(),
+      sapi: ensure_sapi()?,
+    })
   }
 
   /// Get the docroot used for this Embed instance
@@ -107,7 +114,6 @@ impl Embed {
   /// ```rust
   /// use std::env::current_dir;
   /// use php::Embed;
-  ///
   ///
   /// let docroot = current_dir()
   ///   .expect("should have current_dir");
@@ -152,25 +158,21 @@ impl Handler for Embed {
   /// //assert_eq!(response.body(), "Hello, world!");
   /// ```
   fn handle(&self, request: Request) -> Result<Response, Self::Error> {
-    unsafe {
-      ext_php_rs::embed::ext_php_rs_sapi_per_thread_init();
-    }
-
     // Initialize the SAPI module
-    Sapi::startup()?;
+    self.sapi.startup()?;
 
     let url = request.url();
 
-    // Get code and filename to execute
+    // Get original request URI and translate to final path
+    // TODO: Should do this with request rewriting later...
     let request_uri = url.path();
-    let path_translated = cstr(
-      translate_path(&self.docroot, request_uri)?
-        .display()
-        .to_string(),
-    )?;
+    let translated_path = translate_path(&self.docroot, request_uri)?
+      .display()
+      .to_string();
+    let path_translated = cstr(translated_path.clone())?;
     let request_uri = cstr(request_uri)?;
 
-    // Extract request information
+    // Extract request method, query string, and headers
     let request_method = cstr(request.method())?;
     let query_string = cstr(url.query().unwrap_or(""))?;
 
@@ -182,27 +184,16 @@ impl Handler for Embed {
       .unwrap_or(0);
     let cookie_data = nullable_cstr(headers.get("Cookie"))?;
 
-    // Prepare memory stream of the code
-    let mut file_handle = unsafe {
-      let mut file_handle = zend_file_handle {
-        handle: _zend_file_handle__bindgen_ty_1 {
-          fp: std::ptr::null_mut(),
-        },
-        filename: std::ptr::null_mut(),
-        opened_path: std::ptr::null_mut(),
-        type_: 0, //ZEND_HANDLE_FP
-        primary_script: false,
-        in_list: false,
-        buf: std::ptr::null_mut(),
-        len: 0,
-      };
+    // Prepare argv and argc
+    let argc = self.args.len() as i32;
+    let mut argv_ptrs = vec![];
+    for arg in self.args.iter() {
+      let string = CString::new(arg.as_bytes())
+        .map_err(|_| EmbedException::CStringEncodeFailed(arg.to_owned()))?;
+      argv_ptrs.push(string.into_raw());
+    }
 
-      zend_stream_init_filename(&mut file_handle, path_translated);
-
-      // TODO: Make a scope to do zend_destroy_file_handle at the end.
-
-      file_handle
-    };
+    let script_name = translated_path.clone();
 
     let response = try_catch_first(|| {
       RequestContext::for_request(request.clone());
@@ -214,8 +205,8 @@ impl Handler for Embed {
 
         // Reset state
         globals.request_info.proto_num = 110;
-        globals.request_info.argc = 0;
-        globals.request_info.argv = std::ptr::null_mut();
+        globals.request_info.argc = argc;
+        globals.request_info.argv = argv_ptrs.as_mut_ptr();
         globals.request_info.headers_read = false;
         globals.sapi_headers.http_response_code = 200;
 
@@ -237,7 +228,8 @@ impl Handler for Embed {
 
         // Run script in its own try/catch so bailout doesn't skip request shutdown.
         try_catch(|| {
-          if !unsafe { php_execute_script(&mut file_handle) } {
+          let mut file_handle = FileHandleScope::new(script_name.clone());
+          if !unsafe { php_execute_script(file_handle.deref_mut()) } {
             // return Err(EmbedException::ExecuteError);
           }
 
@@ -275,7 +267,7 @@ impl Handler for Embed {
         let mime = if mimetype.is_null() {
           default_mime
         } else {
-          str_from_cstr(mimetype as *const c_char).unwrap_or(default_mime)
+          str_from_cstr(mimetype).unwrap_or(default_mime)
         };
 
         RequestContext::current()
@@ -291,6 +283,8 @@ impl Handler for Embed {
       Ok(response_builder.build())
     })
     .unwrap_or(Err(EmbedException::Bailout))?;
+
+    RequestContext::reclaim();
 
     Ok(response)
   }

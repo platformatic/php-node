@@ -2,7 +2,8 @@ use std::{
   collections::HashMap,
   env::current_exe,
   ffi::{c_char, c_int, c_void, CStr},
-  sync::RwLock,
+  ops::DerefMut,
+  sync::{Arc, RwLock, Weak},
 };
 
 use bytes::Buf;
@@ -12,9 +13,9 @@ use ext_php_rs::{
   embed::SapiModule,
   exception::register_error_observer,
   ffi::{
-    ext_php_rs_sapi_shutdown, ext_php_rs_sapi_startup, php_module_shutdown, php_module_startup,
-    php_register_variable, sapi_send_headers, sapi_shutdown, sapi_startup,
-    ZEND_RESULT_CODE_SUCCESS,
+    ext_php_rs_sapi_per_thread_init, ext_php_rs_sapi_shutdown, ext_php_rs_sapi_startup,
+    php_module_shutdown, php_module_startup, php_register_variable, sapi_send_headers,
+    sapi_shutdown, sapi_startup, ZEND_RESULT_CODE_SUCCESS,
   },
   prelude::*,
   zend::{SapiGlobals, SapiHeader},
@@ -23,30 +24,25 @@ use ext_php_rs::{
 use once_cell::sync::OnceCell;
 
 use crate::{
-  strings::{cstr, maybe_current_dir},
+  strings::{cstr, drop_str, maybe_current_dir, reclaim_str},
   EmbedException, RequestContext,
 };
 use lang_handler::Header;
 
 // This is a helper to ensure that PHP is initialized and deinitialized at the
 // appropriate times.
-pub(crate) struct Sapi(Box<SapiModule>);
+#[derive(Debug)]
+pub(crate) struct Sapi(RwLock<Box<SapiModule>>);
 
 impl Sapi {
-  pub fn new<S>(argv: Vec<S>) -> Result<Self, EmbedException>
-  where
-    S: AsRef<str>,
-  {
-    let argv: Vec<&str> = argv.iter().map(|s| s.as_ref()).collect();
-    // let argc = argv.len() as i32;
-    // let mut argv_ptrs = argv
-    //     .iter()
-    //     .map(|v| v.as_ptr() as *mut c_char)
-    //     .collect::<Vec<*mut c_char>>();
+  pub fn new() -> Result<Self, EmbedException> {
+    let exe_loc = current_exe()
+      .map(|p| p.display().to_string())
+      .map_err(|_| EmbedException::FailedToFindExeLocation)?;
 
     let mut sapi = SapiBuilder::new("php_lang_handler", "PHP Lang Handler")
       .startup_function(sapi_module_startup)
-      // .shutdown_function(sapi_module_shutdown)
+      .shutdown_function(sapi_module_shutdown)
       // .activate_function(sapi_module_activate)
       .deactivate_function(sapi_module_deactivate)
       .ub_write_function(sapi_module_ub_write)
@@ -56,7 +52,7 @@ impl Sapi {
       .read_cookies_function(sapi_module_read_cookies)
       .register_server_variables_function(sapi_module_register_server_variables)
       .log_message_function(sapi_module_log_message)
-      // .executable_location(args.get(0))
+      .executable_location(&exe_loc)
       .build()
       .map_err(|_| EmbedException::SapiNotInitialized)?;
 
@@ -66,20 +62,15 @@ impl Sapi {
     sapi.additional_functions = std::ptr::null();
     // sapi.phpinfo_as_text = 1;
 
-    let exe_loc = argv
-      .first()
-      .map(|s| s.to_string())
-      .or_else(|| current_exe().ok().map(|p| p.display().to_string()))
-      .ok_or(EmbedException::FailedToFindExeLocation)?;
-
-    sapi.executable_location = cstr(exe_loc)?;
     let mut boxed = Box::new(sapi);
 
     unsafe {
       ext_php_rs_sapi_startup();
-
       sapi_startup(boxed.as_mut());
-      php_module_startup(boxed.as_mut(), get_module());
+
+      if let Some(startup) = boxed.startup {
+        startup(boxed.as_mut());
+      }
     }
 
     // TODO: Should maybe capture this to store in EmbedException rather than
@@ -94,54 +85,80 @@ impl Sapi {
             ctx.response_builder().exception(*msg);
           }
         })
+        // TODO: Report this error somehow?
         .ok();
     });
 
-    Ok(Sapi(boxed))
+    Ok(Sapi(RwLock::new(boxed)))
   }
 
-  fn do_startup(&mut self) -> Result<(), EmbedException> {
-    let sapi = self.0.as_mut();
-    let startup = sapi
-      .startup
-      .ok_or(EmbedException::SapiMissingStartupFunction)?;
-    if unsafe { startup(sapi) } != ZEND_RESULT_CODE_SUCCESS {
-      return Err(EmbedException::SapiNotStarted);
+  pub fn startup(&self) -> Result<(), EmbedException> {
+    unsafe {
+      ext_php_rs_sapi_per_thread_init();
     }
+
+    let sapi = &mut self.0.write().map_err(|_| EmbedException::SapiLockFailed)?;
+
+    if let Some(startup) = sapi.startup {
+      if unsafe { startup(sapi.as_mut()) } != ZEND_RESULT_CODE_SUCCESS {
+        return Err(EmbedException::SapiNotStarted);
+      }
+    }
+
     Ok(())
   }
 
-  pub fn startup() -> Result<(), EmbedException> {
-    SAPI_INIT
-      .get()
-      .ok_or(EmbedException::SapiNotInitialized)
-      .and_then(|rwlock| {
-        let mut sapi = rwlock.write().map_err(|_| EmbedException::SapiLockFailed)?;
+  pub fn shutdown(&self) -> Result<(), EmbedException> {
+    let sapi = &mut self.0.write().map_err(|_| EmbedException::SapiLockFailed)?;
 
-        sapi.do_startup()?;
-        Ok(())
-      })
+    if let Some(shutdown) = sapi.shutdown {
+      if unsafe { shutdown(sapi.as_mut()) } != ZEND_RESULT_CODE_SUCCESS {
+        return Err(EmbedException::SapiNotStarted);
+      }
+    }
+
+    Ok(())
   }
 }
 
 impl Drop for Sapi {
   fn drop(&mut self) {
-    unsafe {
-      php_module_shutdown();
-      sapi_shutdown();
+    self.shutdown().unwrap();
 
+    {
+      let sapi = self.0.write().expect("should get writable sapi");
+
+      reclaim_str(sapi.executable_location);
+    }
+
+    unsafe {
+      sapi_shutdown();
       ext_php_rs_sapi_shutdown();
     }
   }
 }
 
-pub(crate) static SAPI_INIT: OnceCell<RwLock<Sapi>> = OnceCell::new();
+pub(crate) static SAPI_INIT: OnceCell<RwLock<Weak<Sapi>>> = OnceCell::new();
 
-pub fn ensure_sapi<S>(argv: Vec<S>) -> Result<&'static RwLock<Sapi>, EmbedException>
-where
-  S: AsRef<str> + std::fmt::Debug,
-{
-  SAPI_INIT.get_or_try_init(|| Sapi::new(argv).map(RwLock::new))
+pub fn ensure_sapi() -> Result<Arc<Sapi>, EmbedException> {
+  let weak_sapi = SAPI_INIT.get_or_try_init(|| Ok(RwLock::new(Weak::new())))?;
+
+  if let Some(sapi) = weak_sapi
+    .read()
+    .map_err(|_| EmbedException::SapiLockFailed)?
+    .upgrade()
+  {
+    return Ok(sapi);
+  }
+
+  let mut rwlock = weak_sapi
+    .write()
+    .map_err(|_| EmbedException::SapiLockFailed)?;
+
+  let sapi = Sapi::new().map(Arc::new)?;
+  *rwlock = Arc::downgrade(&sapi);
+
+  Ok(sapi)
 }
 
 //
@@ -166,15 +183,17 @@ static HARDCODED_INI: &str = "
 ";
 
 #[no_mangle]
-pub extern "C" fn sapi_cli_ini_defaults(configuration_hash: *mut ext_php_rs::types::ZendHashTable) {
-  let hash = unsafe { &mut *configuration_hash };
+pub extern "C" fn sapi_cli_ini_defaults(ht: *mut ext_php_rs::types::ZendHashTable) {
+  let config = unsafe { &mut *ht };
 
-  let config = str::trim(HARDCODED_INI).lines().map(str::trim);
+  let ini_lines = str::trim(HARDCODED_INI).lines().map(str::trim);
 
-  for line in config {
+  for line in ini_lines {
     if let Some((key, value)) = line.split_once('=') {
+      use ext_php_rs::convert::IntoZval;
+      let value = value.into_zval(true).unwrap();
       // TODO: Capture error somehow?
-      hash.insert(key, value).ok();
+      config.insert(key, value).ok();
     }
   }
 }
@@ -187,30 +206,37 @@ pub extern "C" fn sapi_module_startup(
 }
 
 #[no_mangle]
+pub extern "C" fn sapi_module_shutdown(
+  _sapi_module: *mut SapiModule,
+) -> ext_php_rs::ffi::zend_result {
+  unsafe {
+    php_module_shutdown();
+  }
+  ZEND_RESULT_CODE_SUCCESS
+}
+
+#[no_mangle]
 pub extern "C" fn sapi_module_deactivate() -> c_int {
-  {
-    let mut globals = SapiGlobals::get_mut();
+  let mut globals = SapiGlobals::get_mut();
 
-    globals.server_context = std::ptr::null_mut();
-    globals.request_info.argc = 0;
-    globals.request_info.argv = std::ptr::null_mut();
-
-    // drop_str(globals.request_info.request_method);
-    // drop_str(globals.request_info.query_string);
-    // drop_str(globals.request_info.request_uri);
-    // drop_str(globals.request_info.path_translated);
-    // drop_str(globals.request_info.content_type);
-    // drop_str(globals.request_info.cookie_data);
-    // drop_str(globals.request_info.php_self);
-    // drop_str(globals.request_info.auth_user);
-    // drop_str(globals.request_info.auth_password);
-    // drop_str(globals.request_info.auth_digest);
+  for i in 0..globals.request_info.argc {
+    drop_str(unsafe { *globals.request_info.argv.offset(i as isize) });
   }
 
-  // TODO: When _is_ it safe to reclaim the request context?
-  // RequestContext::reclaim();
+  globals.request_info.argc = 0;
+  globals.request_info.argv = std::ptr::null_mut();
 
-  0
+  drop_str(globals.request_info.request_method as *mut c_char);
+  drop_str(globals.request_info.query_string as *mut c_char);
+  drop_str(globals.request_info.request_uri as *mut c_char);
+  drop_str(globals.request_info.path_translated as *mut c_char);
+  drop_str(globals.request_info.content_type as *mut c_char);
+  drop_str(globals.request_info.cookie_data as *mut c_char);
+  drop_str(globals.request_info.auth_user as *mut c_char);
+  drop_str(globals.request_info.auth_password as *mut c_char);
+  drop_str(globals.request_info.auth_digest as *mut c_char);
+
+  ZEND_RESULT_CODE_SUCCESS
 }
 
 #[no_mangle]
@@ -285,109 +311,144 @@ pub extern "C" fn sapi_module_read_cookies() -> *mut c_char {
   SapiGlobals::get().request_info.cookie_data
 }
 
+fn env_var<K, V>(vars: *mut ext_php_rs::types::Zval, key: K, value: V) -> Result<(), EmbedException>
+where
+  K: AsRef<str>,
+  V: AsRef<str>,
+{
+  let c_value = cstr(value.as_ref())?;
+  env_var_c(vars, key, c_value)?;
+  reclaim_str(c_value);
+
+  Ok(())
+}
+
+fn env_var_c<K>(
+  vars: *mut ext_php_rs::types::Zval,
+  key: K,
+  c_value: *mut c_char,
+) -> Result<(), EmbedException>
+where
+  K: AsRef<str>,
+{
+  let c_key = cstr(key.as_ref())?;
+  unsafe {
+    php_register_variable(c_key, c_value, vars);
+  }
+  reclaim_str(c_key);
+
+  Ok(())
+}
+
 #[no_mangle]
 pub extern "C" fn sapi_module_register_server_variables(vars: *mut ext_php_rs::types::Zval) {
-  unsafe {
-    // use ext_php_rs::ffi::php_import_environment_variables;
-    // if let Some(f) = php_import_environment_variables {
-    //   f(vars);
-    // }
+  // use ext_php_rs::ffi::php_import_environment_variables;
+  // if let Some(f) = php_import_environment_variables {
+  //   f(vars);
+  // }
 
-    RequestContext::current()
-      .map(|ctx| ctx.request())
-      // Convert to a result so we can use and_then with ? syntax...
-      .ok_or(EmbedException::RequestContextUnavailable)
-      .and_then(|request| {
-        let headers = request.headers();
+  RequestContext::current()
+    .map(|ctx| ctx.request())
+    // Convert to a result so we can use and_then with ? syntax...
+    .ok_or(EmbedException::RequestContextUnavailable)
+    .and_then(|request| {
+      let headers = request.headers();
 
-        for (key, values) in headers.iter() {
-          let maybe_header = match values {
-            Header::Single(header) => Some(header),
-            Header::Multiple(headers) => headers.first(),
-          };
-
-          if let Some(header) = maybe_header {
-            let cgi_key = format!("HTTP_{}", key.to_ascii_uppercase().replace("-", "_"));
-            php_register_variable(cstr(&cgi_key)?, cstr(header)?, vars);
-          }
-        }
-
-        let globals = SapiGlobals::get();
-        let req_info = &globals.request_info;
-
-        let cwd = maybe_current_dir()?;
-        let cwd_cstr = cstr(cwd.display().to_string())?;
-
-        let script_filename = req_info.path_translated;
-        let script_name = if !req_info.request_uri.is_null() {
-          req_info.request_uri
-        } else {
-          c"".as_ptr()
+      for (key, values) in headers.iter() {
+        let maybe_header = match values {
+          Header::Single(header) => Some(header),
+          Header::Multiple(headers) => headers.first(),
         };
 
-        php_register_variable(cstr("REQUEST_SCHEME")?, cstr(request.url().scheme())?, vars);
-        php_register_variable(cstr("CONTEXT_PREFIX")?, cstr("")?, vars);
-        php_register_variable(cstr("SERVER_ADMIN")?, cstr("webmaster@localhost")?, vars);
-        php_register_variable(cstr("GATEWAY_INTERFACE")?, cstr("CGI/1.1")?, vars);
-
-        php_register_variable(cstr("PHP_SELF")?, script_name, vars);
-        php_register_variable(cstr("SCRIPT_NAME")?, script_name, vars);
-        php_register_variable(cstr("SCRIPT_FILENAME")?, script_filename, vars);
-        php_register_variable(cstr("PATH_TRANSLATED")?, script_filename, vars);
-        php_register_variable(cstr("DOCUMENT_ROOT")?, cwd_cstr, vars);
-        php_register_variable(cstr("CONTEXT_DOCUMENT_ROOT")?, cwd_cstr, vars);
-
-        if let Ok(server_name) = hostname::get() {
-          if let Some(server_name) = server_name.to_str() {
-            php_register_variable(cstr("SERVER_NAME")?, cstr(server_name)?, vars);
-          }
+        if let Some(header) = maybe_header {
+          let cgi_key = format!("HTTP_{}", key.to_ascii_uppercase().replace("-", "_"));
+          env_var(vars, cgi_key, header)?;
         }
+      }
 
-        if !req_info.request_uri.is_null() {
-          php_register_variable(cstr("REQUEST_URI")?, req_info.request_uri, vars);
+      let globals = SapiGlobals::get();
+      let req_info = &globals.request_info;
+
+      let cwd = maybe_current_dir()?;
+      let cwd_cstr = cstr(cwd.display().to_string())?;
+
+      let script_filename = req_info.path_translated;
+      let script_name = if !req_info.request_uri.is_null() {
+        req_info.request_uri
+      } else {
+        std::ptr::null_mut()
+      };
+
+      env_var(vars, "REQUEST_SCHEME", request.url().scheme())?;
+      env_var(vars, "CONTEXT_PREFIX", "")?;
+      env_var(vars, "SERVER_ADMIN", "webmaster@localhost")?;
+      env_var(vars, "GATEWAY_INTERFACE", "CGI/1.1")?;
+
+      env_var_c(vars, "PHP_SELF", script_name as *mut c_char)?;
+      env_var_c(vars, "SCRIPT_NAME", script_name as *mut c_char)?;
+      env_var_c(vars, "SCRIPT_FILENAME", script_filename)?;
+      env_var_c(vars, "PATH_TRANSLATED", script_filename)?;
+      env_var_c(vars, "DOCUMENT_ROOT", cwd_cstr)?;
+      env_var_c(vars, "CONTEXT_DOCUMENT_ROOT", cwd_cstr)?;
+
+      if let Ok(server_name) = hostname::get() {
+        if let Some(server_name) = server_name.to_str() {
+          env_var(vars, "SERVER_NAME", server_name)?;
         }
+      }
 
-        php_register_variable(cstr("SERVER_PROTOCOL")?, cstr("HTTP/1.1")?, vars);
+      if !req_info.request_uri.is_null() {
+        env_var_c(vars, "REQUEST_URI", req_info.request_uri)?;
+      }
 
-        let sapi = SAPI_INIT.get().ok_or(EmbedException::SapiNotInitialized)?;
+      env_var(vars, "SERVER_PROTOCOL", "HTTP/1.1")?;
 
-        php_register_variable(
-          cstr("SERVER_SOFTWARE")?,
-          sapi
-            .read()
-            .map_err(|_| EmbedException::SapiLockFailed)?
-            .0
-            .name,
+      let sapi = SAPI_INIT.get().ok_or(EmbedException::SapiNotInitialized)?;
+
+      env_var_c(
+        vars,
+        "SERVER_SOFTWARE",
+        sapi
+          .read()
+          .map_err(|_| EmbedException::SapiLockFailed)?
+          .upgrade()
+          .ok_or(EmbedException::SapiLockFailed)?
+          .0
+          .read()
+          .map_err(|_| EmbedException::SapiLockFailed)?
+          .name,
+      )?;
+
+      if let Some(info) = request.local_socket() {
+        env_var(vars, "SERVER_ADDR", info.ip().to_string())?;
+        env_var(vars, "SERVER_PORT", info.port().to_string())?;
+      }
+
+      if let Some(info) = request.remote_socket() {
+        env_var(vars, "REMOTE_ADDR", info.ip().to_string())?;
+        env_var(vars, "REMOTE_PORT", info.port().to_string())?;
+      }
+
+      if !req_info.request_method.is_null() {
+        env_var_c(
           vars,
-        );
+          "REQUEST_METHOD",
+          req_info.request_method as *mut c_char,
+        )?;
+      }
 
-        if let Some(info) = request.local_socket() {
-          php_register_variable(cstr("SERVER_ADDR")?, cstr(info.ip().to_string())?, vars);
-          php_register_variable(cstr("SERVER_PORT")?, cstr(info.port().to_string())?, vars);
-        }
+      if !req_info.cookie_data.is_null() {
+        env_var_c(vars, "HTTP_COOKIE", req_info.cookie_data)?;
+      }
 
-        if let Some(info) = request.remote_socket() {
-          php_register_variable(cstr("REMOTE_ADDR")?, cstr(info.ip().to_string())?, vars);
-          php_register_variable(cstr("REMOTE_PORT")?, cstr(info.port().to_string())?, vars);
-        }
+      if !req_info.query_string.is_null() {
+        env_var_c(vars, "QUERY_STRING", req_info.query_string)?;
+      }
 
-        if !req_info.request_method.is_null() {
-          php_register_variable(cstr("REQUEST_METHOD")?, req_info.request_method, vars);
-        }
-
-        if !req_info.cookie_data.is_null() {
-          php_register_variable(cstr("HTTP_COOKIE")?, req_info.cookie_data, vars);
-        }
-
-        if !req_info.query_string.is_null() {
-          php_register_variable(cstr("QUERY_STRING")?, req_info.query_string, vars);
-        }
-
-        Ok(())
-      })
-      // TODO: Capture errors somehow so we can surface them...
-      .ok();
-  };
+      Ok(())
+    })
+    // TODO: Capture errors somehow so we can surface them...
+    .ok();
 }
 
 #[no_mangle]

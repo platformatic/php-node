@@ -32,19 +32,19 @@ pub(crate) fn cstr<S: AsRef<str>>(s: S) -> Result<*mut c_char, EmbedException> {
     .map(|cstr| cstr.into_raw())
 }
 
-pub(crate) fn str_from_cstr<'a>(ptr: *const c_char) -> Result<&'a str, EmbedException> {
+pub(crate) fn str_from_cstr<'a>(ptr: *mut c_char) -> Result<&'a str, EmbedException> {
   unsafe { CStr::from_ptr(ptr) }
     .to_str()
     .map_err(|_| EmbedException::CStringDecodeFailed(ptr.addr()))
 }
 
 #[allow(dead_code)]
-pub(crate) fn reclaim_str(ptr: *const i8) -> CString {
-  unsafe { CString::from_raw(ptr as *mut c_char) }
+pub(crate) fn reclaim_str(ptr: *mut c_char) -> CString {
+  unsafe { CString::from_raw(ptr) }
 }
 
 #[allow(dead_code)]
-pub(crate) fn drop_str(ptr: *const i8) {
+pub(crate) fn drop_str(ptr: *mut c_char) {
   if ptr.is_null() {
     return;
   }
