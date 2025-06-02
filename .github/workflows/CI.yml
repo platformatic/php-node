@@ -490,6 +490,7 @@ jobs:
       #   run: |
       #     npm config set //registry.npmjs.org/:_authToken=$NPM_TOKEN
       #     npm config set scope "@platformatic"
+      #     npm config set provenance true
       #     npm publish --tag dev
       #   env:
       #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -499,7 +500,7 @@ jobs:
         run: |
           npm config set //registry.npmjs.org/:_authToken=$NPM_TOKEN
           npm config set scope "@platformatic"
-          # npm config set provenance true
+          npm config set provenance true
           if git log -1 --pretty=%B | grep "^v\?[0-9]\+\.[0-9]\+\.[0-9]\+";
           then
             npm publish --access public
