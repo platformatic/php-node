@@ -60,6 +60,8 @@ console.log(response.body.toString())
 * `config` {Object} Configuration object
   * `argv` {String[]} Process arguments. **Default:** []
   * `docroot` {String} Document root for PHP. **Default:** process.cwd()
+  * `throwRequestErrors` {Boolean} Throw request errors rather than returning
+    responses with error codes. **Default:** false
 * Returns: {Php}
 
 Construct a new PHP instance to which to dispatch requests.

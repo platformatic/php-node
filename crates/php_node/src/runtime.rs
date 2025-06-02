@@ -3,7 +3,7 @@ use std::sync::Arc;
 use napi::bindgen_prelude::*;
 use napi::{Env, Error, Result, Task};
 
-use php::{Embed, Handler, Request, Response};
+use php::{Embed, EmbedRequestError, Handler, Request, Response};
 
 use crate::{PhpRequest, PhpResponse};
 
@@ -15,6 +15,8 @@ pub struct PhpOptions {
   pub argv: Option<Vec<String>>,
   /// The document root for the PHP instance.
   pub docroot: Option<String>,
+  /// Throw request errors
+  pub throw_request_errors: Option<bool>,
 }
 
 /// A PHP instance.
@@ -37,6 +39,7 @@ pub struct PhpOptions {
 #[napi(js_name = "Php")]
 pub struct PhpRuntime {
   embed: Arc<Embed>,
+  throw_request_errors: bool,
 }
 
 #[napi]
@@ -53,7 +56,11 @@ impl PhpRuntime {
   /// ```
   #[napi(constructor)]
   pub fn new(options: Option<PhpOptions>) -> Result<Self> {
-    let PhpOptions { docroot, argv } = options.unwrap_or_default();
+    let PhpOptions {
+      docroot,
+      argv,
+      throw_request_errors,
+    } = options.unwrap_or_default();
 
     let docroot = docroot
       .ok_or_else(|| {
@@ -71,6 +78,7 @@ impl PhpRuntime {
 
     Ok(Self {
       embed: Arc::new(embed),
+      throw_request_errors: throw_request_errors.unwrap_or_default(),
     })
   }
 
@@ -93,11 +101,19 @@ impl PhpRuntime {
   /// console.log(response.body);
   /// ```
   #[napi]
-  pub fn handle_request(&self, request: &PhpRequest) -> AsyncTask<PhpRequestTask> {
-    AsyncTask::new(PhpRequestTask {
-      embed: self.embed.clone(),
-      request: request.into(),
-    })
+  pub fn handle_request(
+    &self,
+    request: &PhpRequest,
+    signal: Option<AbortSignal>,
+  ) -> AsyncTask<PhpRequestTask> {
+    AsyncTask::with_optional_signal(
+      PhpRequestTask {
+        throw_request_errors: self.throw_request_errors,
+        embed: self.embed.clone(),
+        request: request.into(),
+      },
+      signal,
+    )
   }
 
   /// Handle a PHP request synchronously.
@@ -121,6 +137,7 @@ impl PhpRuntime {
   #[napi]
   pub fn handle_request_sync(&self, request: &PhpRequest) -> Result<PhpResponse> {
     let mut task = PhpRequestTask {
+      throw_request_errors: self.throw_request_errors,
       embed: self.embed.clone(),
       request: request.into(),
     };
@@ -133,18 +150,34 @@ impl PhpRuntime {
 pub struct PhpRequestTask {
   embed: Arc<Embed>,
   request: Request,
+  throw_request_errors: bool,
 }
 
+#[napi]
 impl Task for PhpRequestTask {
   type Output = Response;
   type JsValue = PhpResponse;
 
   // Handle the PHP request in the worker thread.
   fn compute(&mut self) -> Result<Self::Output> {
-    self
-      .embed
-      .handle(self.request.clone())
-      .map_err(|err| Error::from_reason(err.to_string()))
+    let mut result = self.embed.handle(self.request.clone());
+
+    // Translate the various error types into HTTP error responses
+    if !self.throw_request_errors {
+      result = result.or_else(|err| {
+        Ok(match err {
+          EmbedRequestError::ScriptNotFound(_script_name) => {
+            Response::builder().status(404).body("Not Found").build()
+          }
+          _ => Response::builder()
+            .status(500)
+            .body("Internal Server Error")
+            .build(),
+        })
+      })
+    }
+
+    result.map_err(|err| Error::from_reason(err.to_string()))
   }
 
   // Handle converting the PHP response to a JavaScript response in the main thread.
