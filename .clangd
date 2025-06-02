@@ -1,8 +1,0 @@
-CompileFlags:
-  Add:
-    - "--include-directory=crates/php/buildroot/include/php"
-    - "--include-directory=crates/php/buildroot/include/php/ext"
-    - "--include-directory=crates/php/buildroot/include/php/main"
-    - "--include-directory=crates/php/buildroot/include/php/sapi"
-    - "--include-directory=crates/php/buildroot/include/php/TSRM"
-    - "--include-directory=crates/php/buildroot/include/php/Zend"
