@@ -56,6 +56,7 @@ export interface PhpOptions {
   /** Throw request errors */
   throwRequestErrors?: boolean
 }
+undefinedundefined
 export type PhpHeaders = Headers
 /**
  * A multi-map of HTTP headers.
@@ -222,7 +223,7 @@ export declare class Headers {
    * }
    * ```
    */
-  entries(): Array<Entry>
+  entries(): Array<Entry<string, string>>
   /**
    * Get an iterator over the header keys.
    *
