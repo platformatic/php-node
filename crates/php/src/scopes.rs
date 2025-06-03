@@ -13,7 +13,7 @@ use ext_php_rs::{
   },
 };
 
-use super::{strings::cstr, EmbedException};
+use super::EmbedRequestError;
 
 /// A scope in which php request activity may occur. This is responsible for
 /// starting up and shutting down the php request and cleaning up associated
@@ -22,9 +22,9 @@ pub(crate) struct RequestScope();
 
 impl RequestScope {
   /// Starts a new request scope in which a PHP request may operate.
-  pub fn new() -> Result<Self, EmbedException> {
+  pub fn new() -> Result<Self, EmbedRequestError> {
     if unsafe { php_request_startup() } != ZEND_RESULT_CODE_SUCCESS {
-      return Err(EmbedException::SapiRequestNotStarted);
+      return Err(EmbedRequestError::SapiRequestNotStarted);
     }
 
     Ok(RequestScope())

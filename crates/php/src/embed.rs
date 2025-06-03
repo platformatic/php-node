@@ -8,7 +8,7 @@ use std::{
 
 use ext_php_rs::{
   error::Error,
-  ffi::{php_execute_script, php_module_shutdown, sapi_get_default_content_type},
+  ffi::{php_execute_script, sapi_get_default_content_type},
   zend::{try_catch, try_catch_first, ExecutorGlobals, SapiGlobals},
 };
 
@@ -17,8 +17,8 @@ use lang_handler::{Handler, Request, Response};
 use super::{
   sapi::{ensure_sapi, Sapi},
   scopes::{FileHandleScope, RequestScope},
-  strings::{cstr, nullable_cstr, str_from_cstr, translate_path},
-  EmbedException, RequestContext,
+  strings::{cstr, nullable_cstr, translate_path},
+  EmbedRequestError, EmbedStartError, RequestContext,
 };
 
 /// Embed a PHP script into a Rust application to handle HTTP requests.
@@ -51,7 +51,7 @@ impl Embed {
   ///
   /// let embed = Embed::new(docroot);
   /// ```
-  pub fn new<C: AsRef<Path>>(docroot: C) -> Result<Self, EmbedException> {
+  pub fn new<C: AsRef<Path>>(docroot: C) -> Result<Self, EmbedStartError> {
     Embed::new_with_argv::<C, String>(docroot, vec![])
   }
 
@@ -68,7 +68,7 @@ impl Embed {
   ///
   /// let embed = Embed::new_with_args(docroot, args());
   /// ```
-  pub fn new_with_args<C>(docroot: C, args: Args) -> Result<Self, EmbedException>
+  pub fn new_with_args<C>(docroot: C, args: Args) -> Result<Self, EmbedStartError>
   where
     C: AsRef<Path>,
   {
@@ -90,7 +90,7 @@ impl Embed {
   ///   "foo"
   /// ]);
   /// ```
-  pub fn new_with_argv<C, S>(docroot: C, argv: Vec<S>) -> Result<Self, EmbedException>
+  pub fn new_with_argv<C, S>(docroot: C, argv: Vec<S>) -> Result<Self, EmbedStartError>
   where
     C: AsRef<Path>,
     S: AsRef<str> + std::fmt::Debug,
@@ -98,7 +98,7 @@ impl Embed {
     let docroot_path = docroot.as_ref();
     let docroot = docroot_path
       .canonicalize()
-      .map_err(|_| EmbedException::DocRootNotFound(docroot_path.display().to_string()))?;
+      .map_err(|_| EmbedStartError::DocRootNotFound(docroot_path.display().to_string()))?;
 
     Ok(Embed {
       docroot,
@@ -129,7 +129,7 @@ impl Embed {
 }
 
 impl Handler for Embed {
-  type Error = EmbedException;
+  type Error = EmbedRequestError;
 
   /// Handles an HTTP request.
   ///
@@ -169,34 +169,40 @@ impl Handler for Embed {
     let translated_path = translate_path(&self.docroot, request_uri)?
       .display()
       .to_string();
-    let path_translated = cstr(translated_path.clone())?;
-    let request_uri = cstr(request_uri)?;
+    let path_translated = cstr(translated_path.clone())
+      .map_err(|_| EmbedRequestError::FailedToSetRequestInfo("path_translated".into()))?;
+    let request_uri = cstr(request_uri)
+      .map_err(|_| EmbedRequestError::FailedToSetRequestInfo("request_uri".into()))?;
 
     // Extract request method, query string, and headers
-    let request_method = cstr(request.method())?;
-    let query_string = cstr(url.query().unwrap_or(""))?;
+    let request_method = cstr(request.method())
+      .map_err(|_| EmbedRequestError::FailedToSetRequestInfo("request_method".into()))?;
+    let query_string = cstr(url.query().unwrap_or(""))
+      .map_err(|_| EmbedRequestError::FailedToSetRequestInfo("query_string".into()))?;
 
     let headers = request.headers();
-    let content_type = nullable_cstr(headers.get("Content-Type"))?;
+    let content_type = nullable_cstr(headers.get("Content-Type"))
+      .map_err(|_| EmbedRequestError::FailedToSetRequestInfo("content_type".into()))?;
     let content_length = headers
       .get("Content-Length")
       .map(|v| v.parse::<i64>().unwrap_or(0))
       .unwrap_or(0);
-    let cookie_data = nullable_cstr(headers.get("Cookie"))?;
+    let cookie_data = nullable_cstr(headers.get("Cookie"))
+      .map_err(|_| EmbedRequestError::FailedToSetRequestInfo("cookie_data".into()))?;
 
     // Prepare argv and argc
     let argc = self.args.len() as i32;
     let mut argv_ptrs = vec![];
     for arg in self.args.iter() {
       let string = CString::new(arg.as_bytes())
-        .map_err(|_| EmbedException::CStringEncodeFailed(arg.to_owned()))?;
+        .map_err(|_| EmbedRequestError::FailedToSetRequestInfo("argv".into()))?;
       argv_ptrs.push(string.into_raw());
     }
 
     let script_name = translated_path.clone();
 
     let response = try_catch_first(|| {
-      RequestContext::for_request(request.clone());
+      RequestContext::for_request(request.clone(), self.docroot.clone());
 
       // Set server context
       {
@@ -247,12 +253,12 @@ impl Handler for Embed {
 
             // TODO: Should exceptions be raised or only captured on
             // the response builder?
-            return Err(EmbedException::Exception(ex.to_string()));
+            return Err(EmbedRequestError::Exception(ex.to_string()));
           }
 
           Ok(())
         })
-        .unwrap_or(Err(EmbedException::Bailout))?;
+        .unwrap_or(Err(EmbedRequestError::Bailout))?;
 
         let (mimetype, http_response_code) = {
           let globals = SapiGlobals::get();
@@ -262,13 +268,13 @@ impl Handler for Embed {
           )
         };
 
-        let default_mime = str_from_cstr(unsafe { sapi_get_default_content_type() })?;
+        let mime_ptr = unsafe { (mimetype as *mut std::ffi::c_char).as_ref() }
+          .or(unsafe { sapi_get_default_content_type().as_ref() })
+          .ok_or(EmbedRequestError::FailedToDetermineContentType)?;
 
-        let mime = if mimetype.is_null() {
-          default_mime
-        } else {
-          str_from_cstr(mimetype).unwrap_or(default_mime)
-        };
+        let mime = unsafe { std::ffi::CStr::from_ptr(mime_ptr) }
+          .to_str()
+          .map_err(|_| EmbedRequestError::FailedToDetermineContentType)?;
 
         RequestContext::current()
           .map(|ctx| {
@@ -277,12 +283,12 @@ impl Handler for Embed {
               .status(http_response_code)
               .header("Content-Type", mime)
           })
-          .ok_or(EmbedException::ResponseBuildError)?
+          .ok_or(EmbedRequestError::ResponseBuildError)?
       };
 
       Ok(response_builder.build())
     })
-    .unwrap_or(Err(EmbedException::Bailout))?;
+    .unwrap_or(Err(EmbedRequestError::Bailout))?;
 
     RequestContext::reclaim();
 

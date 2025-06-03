@@ -53,6 +53,8 @@ export interface PhpOptions {
   argv?: Array<string>
   /** The document root for the PHP instance. */
   docroot?: string
+  /** Throw request errors */
+  throwRequestErrors?: boolean
 }
 export type PhpHeaders = Headers
 /**
@@ -514,7 +516,7 @@ export declare class Php {
    * console.log(response.body);
    * ```
    */
-  handleRequest(request: Request): Promise<unknown>
+  handleRequest(request: Request, signal?: AbortSignal | undefined | null): Promise<unknown>
   /**
    * Handle a PHP request synchronously.
    *

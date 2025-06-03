@@ -129,3 +129,41 @@ test('Has expected args', async (t) => {
 
   t.is(res.body.toString('utf8'), JSON.stringify(process.argv))
 })
+
+test('Not found script returns response with status', async (t) => {
+  const mockroot = await MockRoot.from({})
+  t.teardown(() => mockroot.clean())
+
+  const php = new Php({
+    argv: process.argv,
+    docroot: mockroot.path
+  })
+
+  const req = new Request({
+    url: 'http://example.com/index.php'
+  })
+
+  const res = await php.handleRequest(req)
+  t.is(res.status, 404)
+
+  t.is(res.body.toString('utf8'), 'Not Found')
+})
+
+test('Allow receiving true errors', async (t) => {
+  const mockroot = await MockRoot.from({})
+  t.teardown(() => mockroot.clean())
+
+  const php = new Php({
+    argv: process.argv,
+    docroot: mockroot.path,
+    throwRequestErrors: true
+  })
+
+  const req = new Request({
+    url: 'http://example.com/index.php'
+  })
+
+  await t.throwsAsync(() => php.handleRequest(req), {
+    message: /^Script not found: .*\/index\.php$/
+  }, 'should throw error')
+})

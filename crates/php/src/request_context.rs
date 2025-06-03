@@ -1,12 +1,13 @@
 use ext_php_rs::zend::SapiGlobals;
 use lang_handler::{Request, ResponseBuilder};
-use std::ffi::c_void;
+use std::{ffi::c_void, path::PathBuf};
 
 /// The request context for the PHP SAPI.
 #[derive(Debug)]
 pub struct RequestContext {
   request: Request,
   response_builder: ResponseBuilder,
+  docroot: PathBuf,
 }
 
 impl RequestContext {
@@ -23,17 +24,21 @@ impl RequestContext {
   ///   .build()
   ///   .expect("should build request");
   ///
-  /// RequestContext::for_request(request);
+  /// RequestContext::for_request(request, "/foo");
   ///
   /// let context = RequestContext::current()
   ///   .expect("should acquire current context");
   ///
   /// assert_eq!(context.request().method(), "GET");
   /// ```
-  pub fn for_request(request: Request) {
+  pub fn for_request<S>(request: Request, docroot: S)
+  where
+    S: Into<PathBuf>,
+  {
     let context = Box::new(RequestContext {
       request,
       response_builder: ResponseBuilder::new(),
+      docroot: docroot.into(),
     });
     let mut globals = SapiGlobals::get_mut();
     globals.server_context = Box::into_raw(context) as *mut c_void;
@@ -52,7 +57,7 @@ impl RequestContext {
   ///   .build()
   ///   .expect("should build request");
   ///
-  /// RequestContext::for_request(request);
+  /// RequestContext::for_request(request, "/foo");
   ///
   /// let current_context = RequestContext::current()
   ///   .expect("should acquire current context");
@@ -85,7 +90,7 @@ impl RequestContext {
   ///   .build()
   ///   .expect("should build request");
   ///
-  /// RequestContext::for_request(request);
+  /// RequestContext::for_request(request, "/foo");
   ///
   /// RequestContext::reclaim()
   ///   .expect("should acquire current context");
@@ -117,7 +122,7 @@ impl RequestContext {
   ///   .build()
   ///   .expect("should build request");
   ///
-  /// RequestContext::for_request(request);
+  /// RequestContext::for_request(request, "/foo");
   ///
   /// let context = RequestContext::current()
   ///   .expect("should acquire current context");
@@ -141,7 +146,7 @@ impl RequestContext {
   ///   .build()
   ///   .expect("should build request");
   ///
-  /// RequestContext::for_request(request);
+  /// RequestContext::for_request(request, "/foo");
   ///
   /// let mut context = RequestContext::current()
   ///   .expect("should acquire current context");
@@ -150,5 +155,30 @@ impl RequestContext {
   /// ```
   pub fn response_builder(&mut self) -> &mut ResponseBuilder {
     &mut self.response_builder
+  }
+
+  /// Returns the docroot associated with this request context
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// # use std::path::PathBuf;
+  /// use php::{Request, RequestContext};
+  ///
+  /// let request = Request::builder()
+  ///   .method("GET")
+  ///   .url("http://example.com").expect("should parse url")
+  ///   .build()
+  ///   .expect("should build request");
+  ///
+  /// RequestContext::for_request(request, "/foo");
+  ///
+  /// let mut context = RequestContext::current()
+  ///   .expect("should acquire current context");
+  ///
+  /// assert_eq!(context.docroot(), PathBuf::new().join("/foo"));
+  /// ```
+  pub fn docroot(&self) -> PathBuf {
+    self.docroot.to_owned()
   }
 }
