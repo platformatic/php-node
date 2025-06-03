@@ -47,19 +47,18 @@ export interface PhpResponseOptions {
   /** The exception for the response. */
   exception?: string
 }
-export interface PhpRewriteCond {
+export interface PhpRewriteCondOptions {
   type: string
   args: Array<string>
 }
-export interface PhpRewriterInst {
-  type: string
-  args: Array<string>
-}
-/** Options for creating a new PHP response. */
 export interface PhpRewriterOptions {
-  operation: string
-  conditions: Array<PhpRewriteCond>
-  rewriters: Array<PhpRewriterInst>
+  type: string
+  args: Array<string>
+}
+export interface PhpConditionalRewriterOptions {
+  operation?: string
+  conditions: Array<PhpRewriteCondOptions>
+  rewriters: Array<PhpRewriterOptions>
 }
 /** Options for creating a new PHP instance. */
 export interface PhpOptions {
@@ -69,6 +68,8 @@ export interface PhpOptions {
   docroot?: string
   /** Throw request errors */
   throwRequestErrors?: boolean
+  /** Request rewriter */
+  rewrite?: Rewriter
 }
 export type PhpHeaders = Headers
 /**
@@ -478,7 +479,7 @@ export declare class Response {
 }
 export type PhpRewriter = Rewriter
 export declare class Rewriter {
-  constructor(options: Array<PhpRewriterOptions>)
+  constructor(options: Array<PhpConditionalRewriterOptions>)
   rewrite(request: Request): Request
 }
 export type PhpRuntime = Php

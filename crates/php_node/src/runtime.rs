@@ -5,11 +5,11 @@ use napi::{Env, Error, Result, Task};
 
 use php::{Embed, EmbedRequestError, Handler, Request, Response};
 
-use crate::{PhpRequest, PhpResponse};
+use crate::{PhpRequest, PhpResponse, PhpRewriter};
 
 /// Options for creating a new PHP instance.
 #[napi(object)]
-#[derive(Clone, Default)]
+#[derive(Default)]
 pub struct PhpOptions {
   /// The command-line arguments for the PHP instance.
   pub argv: Option<Vec<String>>,
@@ -17,6 +17,8 @@ pub struct PhpOptions {
   pub docroot: Option<String>,
   /// Throw request errors
   pub throw_request_errors: Option<bool>,
+  /// Request rewriter
+  pub rewrite: Option<Reference<PhpRewriter>>,
 }
 
 /// A PHP instance.
@@ -60,6 +62,7 @@ impl PhpRuntime {
       docroot,
       argv,
       throw_request_errors,
+      rewrite,
     } = options.unwrap_or_default();
 
     let docroot = docroot
@@ -70,9 +73,15 @@ impl PhpRuntime {
       })
       .map_err(|_| Error::from_reason("Could not determine docroot"))?;
 
+    let rewriter = if let Some(found) = rewrite {
+      Some(found.into_rewriter()?)
+    } else {
+      None
+    };
+
     let embed = match argv {
-      Some(argv) => Embed::new_with_argv(docroot, argv),
-      None => Embed::new(docroot),
+      Some(argv) => Embed::new_with_argv(docroot, rewriter, argv),
+      None => Embed::new(docroot, rewriter),
     }
     .map_err(|err| Error::from_reason(err.to_string()))?;
 

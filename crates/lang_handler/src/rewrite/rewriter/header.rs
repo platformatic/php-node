@@ -10,7 +10,7 @@ pub struct HeaderRewriter {
 }
 
 impl HeaderRewriter {
-  pub fn new<N, R, S>(name: N, pattern: R, replacement: S) -> Result<Self, Error>
+  pub fn new<N, R, S>(name: N, pattern: R, replacement: S) -> Result<Box<Self>, Error>
   where
     N: Into<String>,
     R: TryInto<Regex>,
@@ -20,11 +20,11 @@ impl HeaderRewriter {
     let name = name.into();
     let pattern = pattern.try_into()?;
     let replacement = replacement.into();
-    Ok(Self {
+    Ok(Box::new(Self {
       name,
       pattern,
       replacement,
-    })
+    }))
   }
 }
 
@@ -53,7 +53,8 @@ mod test {
 
   #[test]
   fn test_header_rewriter() {
-    let rewriter = HeaderRewriter::new("TEST", r"^foo$", "bar").expect("regex should be valid");
+    let rewriter =
+      HeaderRewriter::new("TEST", r"^(foo)$", "${1}bar").expect("regex should be valid");
 
     let request = Request::builder()
       .url("http://example.com/index.php")
@@ -63,7 +64,7 @@ mod test {
 
     assert_eq!(
       rewriter.rewrite(request).headers().get("TEST"),
-      Some("bar".to_string())
+      Some("foobar".to_string())
     );
   }
 }

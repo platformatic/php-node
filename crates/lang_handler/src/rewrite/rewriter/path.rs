@@ -9,7 +9,7 @@ pub struct PathRewriter {
 }
 
 impl PathRewriter {
-  pub fn new<R, S>(pattern: R, replacement: S) -> Result<Self, Error>
+  pub fn new<R, S>(pattern: R, replacement: S) -> Result<Box<Self>, Error>
   where
     R: TryInto<Regex>,
     Error: From<<R as TryInto<Regex>>::Error>,
@@ -17,10 +17,10 @@ impl PathRewriter {
   {
     let pattern = pattern.try_into()?;
     let replacement = replacement.into();
-    Ok(Self {
+    Ok(Box::new(Self {
       pattern,
       replacement,
-    })
+    }))
   }
 }
 

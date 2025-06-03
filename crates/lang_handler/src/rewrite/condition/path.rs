@@ -13,13 +13,13 @@ pub struct PathCondition {
 
 impl PathCondition {
   /// Construct a new PathCondition matching the given Regex pattern.
-  pub fn new<R>(pattern: R) -> Result<Self, Error>
+  pub fn new<R>(pattern: R) -> Result<Box<Self>, Error>
   where
     R: TryInto<Regex>,
     Error: From<<R as TryInto<Regex>>::Error>,
   {
     let pattern = pattern.try_into()?;
-    Ok(Self { pattern })
+    Ok(Box::new(Self { pattern }))
   }
 }
 

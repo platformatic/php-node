@@ -12,7 +12,7 @@ use ext_php_rs::{
   zend::{try_catch, try_catch_first, ExecutorGlobals, SapiGlobals},
 };
 
-use lang_handler::{Handler, Request, Response};
+use lang_handler::{rewrite::Rewriter, Handler, Request, Response};
 
 use super::{
   sapi::{ensure_sapi, Sapi},
@@ -22,7 +22,6 @@ use super::{
 };
 
 /// Embed a PHP script into a Rust application to handle HTTP requests.
-#[derive(Debug)]
 pub struct Embed {
   docroot: PathBuf,
   args: Vec<String>,
@@ -30,6 +29,19 @@ pub struct Embed {
   // NOTE: This needs to hold the SAPI to keep it alive
   #[allow(dead_code)]
   sapi: Arc<Sapi>,
+
+  rewriter: Option<Box<dyn Rewriter>>,
+}
+
+impl std::fmt::Debug for Embed {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    f.debug_struct("Embed")
+      .field("docroot", &self.docroot)
+      .field("args", &self.args)
+      .field("sapi", &self.sapi)
+      .field("rewriter", &"Box<dyn Rewriter>")
+      .finish()
+  }
 }
 
 // An embed instance may be constructed on the main thread and then shared
@@ -49,10 +61,13 @@ impl Embed {
   /// let docroot = current_dir()
   ///   .expect("should have current_dir");
   ///
-  /// let embed = Embed::new(docroot);
+  /// let embed = Embed::new(docroot, None);
   /// ```
-  pub fn new<C: AsRef<Path>>(docroot: C) -> Result<Self, EmbedStartError> {
-    Embed::new_with_argv::<C, String>(docroot, vec![])
+  pub fn new<C>(docroot: C, rewriter: Option<Box<dyn Rewriter>>) -> Result<Self, EmbedStartError>
+  where
+    C: AsRef<Path>,
+  {
+    Embed::new_with_argv::<C, String>(docroot, rewriter, vec![])
   }
 
   /// Creates a new `Embed` instance with command-line arguments.
@@ -66,13 +81,17 @@ impl Embed {
   /// let docroot = current_dir()
   ///   .expect("should have current_dir");
   ///
-  /// let embed = Embed::new_with_args(docroot, args());
+  /// let embed = Embed::new_with_args(docroot, None, args());
   /// ```
-  pub fn new_with_args<C>(docroot: C, args: Args) -> Result<Self, EmbedStartError>
+  pub fn new_with_args<C>(
+    docroot: C,
+    rewriter: Option<Box<dyn Rewriter>>,
+    args: Args,
+  ) -> Result<Self, EmbedStartError>
   where
     C: AsRef<Path>,
   {
-    Embed::new_with_argv(docroot, args.collect())
+    Embed::new_with_argv(docroot, rewriter, args.collect())
   }
 
   /// Creates a new `Embed` instance with command-line arguments.
@@ -86,11 +105,15 @@ impl Embed {
   /// let docroot = current_dir()
   ///   .expect("should have current_dir");
   ///
-  /// let embed = Embed::new_with_argv(docroot, vec![
+  /// let embed = Embed::new_with_argv(docroot, None, vec![
   ///   "foo"
   /// ]);
   /// ```
-  pub fn new_with_argv<C, S>(docroot: C, argv: Vec<S>) -> Result<Self, EmbedStartError>
+  pub fn new_with_argv<C, S>(
+    docroot: C,
+    rewriter: Option<Box<dyn Rewriter>>,
+    argv: Vec<S>,
+  ) -> Result<Self, EmbedStartError>
   where
     C: AsRef<Path>,
     S: AsRef<str> + std::fmt::Debug,
@@ -104,6 +127,7 @@ impl Embed {
       docroot,
       args: argv.iter().map(|v| v.as_ref().to_string()).collect(),
       sapi: ensure_sapi()?,
+      rewriter,
     })
   }
 
@@ -118,7 +142,7 @@ impl Embed {
   /// let docroot = current_dir()
   ///   .expect("should have current_dir");
   ///
-  /// let embed = Embed::new(&docroot)
+  /// let embed = Embed::new(&docroot, None)
   ///   .expect("should have constructed Embed");
   ///
   /// assert_eq!(embed.docroot(), docroot.as_path());
@@ -142,7 +166,7 @@ impl Handler for Embed {
   /// let docroot = current_dir()
   ///   .expect("should have current_dir");
   ///
-  /// let handler = Embed::new(docroot)
+  /// let handler = Embed::new(docroot, None)
   ///   .expect("should construct Embed");
   ///
   /// let request = Request::builder()
@@ -158,6 +182,14 @@ impl Handler for Embed {
   /// //assert_eq!(response.body(), "Hello, world!");
   /// ```
   fn handle(&self, request: Request) -> Result<Response, Self::Error> {
+    let docroot = self.docroot.clone();
+
+    // Apply request rewriting rules
+    let mut request = request.clone();
+    if let Some(rewriter) = &self.rewriter {
+      request = rewriter.rewrite(request)
+    }
+
     // Initialize the SAPI module
     self.sapi.startup()?;
 
@@ -166,9 +198,7 @@ impl Handler for Embed {
     // Get original request URI and translate to final path
     // TODO: Should do this with request rewriting later...
     let request_uri = url.path();
-    let translated_path = translate_path(&self.docroot, request_uri)?
-      .display()
-      .to_string();
+    let translated_path = translate_path(&docroot, request_uri)?.display().to_string();
     let path_translated = cstr(translated_path.clone())
       .map_err(|_| EmbedRequestError::FailedToSetRequestInfo("path_translated".into()))?;
     let request_uri = cstr(request_uri)
@@ -202,7 +232,7 @@ impl Handler for Embed {
     let script_name = translated_path.clone();
 
     let response = try_catch_first(|| {
-      RequestContext::for_request(request.clone(), self.docroot.clone());
+      RequestContext::for_request(request.clone(), docroot.clone());
 
       // Set server context
       {

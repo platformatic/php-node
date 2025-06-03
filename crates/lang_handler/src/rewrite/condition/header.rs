@@ -5,7 +5,7 @@ use regex::{Error, Regex};
 use super::Condition;
 use crate::Request;
 
-/// Match request header to a regex pattern
+/// Matches a request header to a regex pattern
 #[derive(Clone, Debug)]
 pub struct HeaderCondition {
   name: String,
@@ -15,7 +15,7 @@ pub struct HeaderCondition {
 impl HeaderCondition {
   /// Construct a new HeaderCondition matching the given header name and Regex
   /// pattern.
-  pub fn new<S, R>(name: S, pattern: R) -> Result<Self, Error>
+  pub fn new<S, R>(name: S, pattern: R) -> Result<Box<Self>, Error>
   where
     S: Into<String>,
     R: TryInto<Regex>,
@@ -23,7 +23,7 @@ impl HeaderCondition {
   {
     let name = name.into();
     let pattern = pattern.try_into()?;
-    Ok(Self { name, pattern })
+    Ok(Box::new(Self { name, pattern }))
   }
 }
 

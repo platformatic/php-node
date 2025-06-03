@@ -1,16 +1,15 @@
+mod closure;
+mod existence;
+mod group;
 mod header;
 mod path;
-mod set;
 
-pub use header::*;
-pub use path::*;
-pub use set::*;
+use crate::Request;
 
-use super::Request;
-
-///
-/// Conditions
-///
+pub use existence::{ExistenceCondition, NonExistenceCondition};
+pub use group::ConditionGroup;
+pub use header::HeaderCondition;
+pub use path::PathCondition;
 
 /// A Condition is used to match against request state before deciding to apply
 /// a given Rewrite or set of Rewrites.
@@ -20,29 +19,69 @@ pub trait Condition: Sync + Send {
   fn matches(&self, request: &Request) -> bool;
 }
 
-/// Support plain functions as conditions
-impl<F> Condition for F
-where
-  F: Fn(&Request) -> bool + Sync + Send,
-{
-  fn matches(&self, request: &Request) -> bool {
-    self(request)
+impl<T: ?Sized> ConditionExt for T where T: Condition {}
+
+pub trait ConditionExt: Condition {
+  /// Make a new condition which must pass both conditions
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// # use lang_handler::{
+  /// #  Request,
+  /// #  rewrite::{Condition, ConditionExt, PathCondition, HeaderCondition}
+  /// # };
+  /// let path = PathCondition::new("^/index.php$")
+  ///   .expect("should be valid regex");
+  ///
+  /// let header = HeaderCondition::new("TEST", "^foo$")
+  ///   .expect("should be valid regex");
+  ///
+  /// let path_and_header = path.and(header);
+  ///
+  /// let request = Request::builder()
+  ///   .url("http://example.com/index.php")
+  ///   .header("TEST", "foo")
+  ///   .build()
+  ///   .expect("should build request");
+  ///
+  /// assert!(path_and_header.matches(&request));
+  /// ```
+  fn and<C>(self: Box<Self>, other: Box<C>) -> Box<ConditionGroup<Self, C>>
+  where
+    C: Condition + ?Sized,
+  {
+    ConditionGroup::and(self, other)
   }
-}
 
-#[cfg(test)]
-mod test {
-  use super::*;
-
-  #[test]
-  fn test_closure_condition() {
-    let condition = |_: &Request| true;
-
-    let request = Request::builder()
-      .url("http://example.com/index.php")
-      .build()
-      .expect("request should build");
-
-    assert!(condition.matches(&request));
+  /// Make a new condition which must pass either condition
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// # use lang_handler::{
+  /// #  Request,
+  /// #  rewrite::{Condition, ConditionExt, PathCondition, HeaderCondition}
+  /// # };
+  /// let path = PathCondition::new("^/index.php$")
+  ///   .expect("should be valid regex");
+  ///
+  /// let header = HeaderCondition::new("TEST", "^foo$")
+  ///   .expect("should be valid regex");
+  ///
+  /// let path_or_header = path.or(header);
+  ///
+  /// let request = Request::builder()
+  ///   .url("http://example.com/index.php")
+  ///   .build()
+  ///   .expect("should build request");
+  ///
+  /// assert!(path_or_header.matches(&request));
+  /// ```
+  fn or<C>(self: Box<Self>, other: Box<C>) -> Box<ConditionGroup<Self, C>>
+  where
+    C: Condition + ?Sized,
+  {
+    ConditionGroup::or(self, other)
   }
 }

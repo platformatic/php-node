@@ -3,6 +3,7 @@ import test from 'ava'
 import { Php, Request } from '../index.js'
 
 import { MockRoot } from './util.mjs'
+import { Rewriter } from '../index.js'
 
 test('Support input/output streams', async (t) => {
   const mockroot = await MockRoot.from({
@@ -166,4 +167,43 @@ test('Allow receiving true errors', async (t) => {
   await t.throwsAsync(() => php.handleRequest(req), {
     message: /^Script not found: .*\/index\.php$/
   }, 'should throw error')
+})
+
+test('Accept rewriter', async (t) => {
+  const mockroot = await MockRoot.from({
+    'index.php': '<?php echo "Hello, World!"; ?>'
+  })
+  t.teardown(() => mockroot.clean())
+
+  const rewrite = new Rewriter([
+    {
+      conditions: [
+        {
+          type: 'path',
+          args: ['^/rewrite_me$']
+        }
+      ],
+      rewriters: [
+        {
+          type: 'path',
+          args: ['^/rewrite_me$', '/index.php']
+        }
+      ]
+    }
+  ])
+
+  const php = new Php({
+    argv: process.argv,
+    docroot: mockroot.path,
+    throwRequestErrors: true,
+    rewrite
+  })
+
+  const req = new Request({
+    url: 'http://example.com/rewrite_me'
+  })
+
+  const res = await php.handleRequest(req)
+  t.is(res.status, 200)
+  t.is(res.body.toString('utf8'), 'Hello, World!')
 })
