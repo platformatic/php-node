@@ -1,5 +1,5 @@
 import { argv, cwd } from 'node:process'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { readFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { strictEqual } from 'node:assert'
