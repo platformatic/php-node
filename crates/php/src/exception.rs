@@ -1,5 +1,5 @@
 /// Set of exceptions which may be produced by php::Embed
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub enum EmbedStartError {
   DocRootNotFound(String),
   ExeLocationNotFound,
@@ -20,7 +20,7 @@ impl std::fmt::Display for EmbedStartError {
   }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub enum EmbedRequestError {
   SapiNotStarted,
   SapiNotShutdown,

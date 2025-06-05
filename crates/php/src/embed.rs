@@ -160,13 +160,15 @@ impl Handler for Embed {
   /// # Examples
   ///
   /// ```
-  /// use std::env::current_dir;
-  /// use php::{Embed, Handler, Request, Response};
+  /// use std::{env::temp_dir, fs::File, io::Write};
+  /// use php::{Embed, Handler, Request, Response, MockRoot};
   ///
-  /// let docroot = current_dir()
-  ///   .expect("should have current_dir");
+  /// let docroot = MockRoot::builder()
+  ///   .file("index.php", "<?php echo \"Hello, World!\"; ?>")
+  ///   .build()
+  ///   .expect("should prepare docroot");
   ///
-  /// let handler = Embed::new(docroot, None)
+  /// let handler = Embed::new(docroot.clone(), None)
   ///   .expect("should construct Embed");
   ///
   /// let request = Request::builder()
