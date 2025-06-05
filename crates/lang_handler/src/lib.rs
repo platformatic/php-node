@@ -5,6 +5,7 @@ mod headers;
 mod request;
 mod response;
 pub mod rewrite;
+mod test;
 
 #[cfg(feature = "c")]
 pub use ffi::*;
@@ -12,4 +13,5 @@ pub use handler::Handler;
 pub use headers::{Header, Headers};
 pub use request::{Request, RequestBuilder};
 pub use response::{Response, ResponseBuilder};
+pub use test::{MockRoot, MockRootBuilder};
 pub use url::Url;

@@ -10,6 +10,17 @@ pub struct HeaderRewriter {
 }
 
 impl HeaderRewriter {
+  /// Construct a new HeaderRewriter to replace the named header using the
+  /// provided regex pattern and replacement.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// # use lang_handler::rewrite::{Rewriter, HeaderRewriter};
+  /// # use lang_handler::Request;
+  /// let rewriter = HeaderRewriter::new("TEST", "(foo)", "$1bar")
+  ///   .expect("should be valid regex");
+  /// ```
   pub fn new<N, R, S>(name: N, pattern: R, replacement: S) -> Result<Box<Self>, Error>
   where
     N: Into<String>,
@@ -29,6 +40,27 @@ impl HeaderRewriter {
 }
 
 impl Rewriter for HeaderRewriter {
+  /// Rewrite named header using the provided regex pattern and replacement.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// # use lang_handler::rewrite::{Rewriter, HeaderRewriter};
+  /// # use lang_handler::Request;
+  /// let rewriter = HeaderRewriter::new("TEST", "(foo)", "${1}bar")
+  ///   .expect("should be valid regex");
+  ///
+  /// let request = Request::builder()
+  ///   .url("http://example.com/index.php")
+  ///   .header("TEST", "foo")
+  ///   .build()
+  ///   .expect("should build request");
+  ///
+  /// assert_eq!(
+  ///   rewriter.rewrite(request).headers().get("TEST"),
+  ///   Some("foobar".to_string())
+  /// );
+  /// ```
   fn rewrite(&self, request: Request) -> Request {
     let HeaderRewriter {
       name,
@@ -44,27 +76,5 @@ impl Rewriter for HeaderRewriter {
         .build()
         .unwrap_or(request),
     }
-  }
-}
-
-#[cfg(test)]
-mod test {
-  use super::*;
-
-  #[test]
-  fn test_header_rewriter() {
-    let rewriter =
-      HeaderRewriter::new("TEST", r"^(foo)$", "${1}bar").expect("regex should be valid");
-
-    let request = Request::builder()
-      .url("http://example.com/index.php")
-      .header("TEST", "foo")
-      .build()
-      .expect("request should build");
-
-    assert_eq!(
-      rewriter.rewrite(request).headers().get("TEST"),
-      Some("foobar".to_string())
-    );
   }
 }

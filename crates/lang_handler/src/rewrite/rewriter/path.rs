@@ -9,6 +9,16 @@ pub struct PathRewriter {
 }
 
 impl PathRewriter {
+  /// Construct PathRewriter using the provided regex pattern and replacement.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// # use lang_handler::rewrite::{Rewriter, PathRewriter};
+  /// # use lang_handler::Request;
+  /// let rewriter = PathRewriter::new("^(/foo)$", "/index.php")
+  ///   .expect("should be valid regex");
+  /// ```
   pub fn new<R, S>(pattern: R, replacement: S) -> Result<Box<Self>, Error>
   where
     R: TryInto<Regex>,
@@ -25,6 +35,26 @@ impl PathRewriter {
 }
 
 impl Rewriter for PathRewriter {
+  /// Rewrite request path using the provided regex pattern and replacement.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// # use lang_handler::rewrite::{Rewriter, PathRewriter};
+  /// # use lang_handler::Request;
+  /// let rewriter = PathRewriter::new("^(/foo)$", "/index.php")
+  ///   .expect("should be valid regex");
+  ///
+  /// let request = Request::builder()
+  ///   .url("http://example.com/foo")
+  ///   .build()
+  ///   .expect("should build request");
+  ///
+  /// assert_eq!(
+  ///   rewriter.rewrite(request).url().path(),
+  ///   "/index.php".to_string()
+  /// );
+  /// ```
   fn rewrite(&self, request: Request) -> Request {
     let url = request.url();
 
@@ -38,25 +68,5 @@ impl Rewriter for PathRewriter {
     copy.set_path(path.as_ref());
 
     request.extend().url(copy).build().unwrap_or(request)
-  }
-}
-
-#[cfg(test)]
-mod test {
-  use super::*;
-
-  #[test]
-  fn test_path_rewriter() {
-    let rewriter = PathRewriter::new(r"^(/index.php)$", "/foo$1").expect("regex should be valid");
-
-    let request = Request::builder()
-      .url("http://example.com/index.php")
-      .build()
-      .expect("request should build");
-
-    assert_eq!(
-      rewriter.rewrite(request).url().path(),
-      "/foo/index.php".to_string()
-    );
   }
 }

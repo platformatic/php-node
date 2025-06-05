@@ -28,30 +28,3 @@ where
     self.1.rewrite(request)
   }
 }
-
-#[cfg(test)]
-mod test {
-  use super::*;
-  use crate::rewrite::{PathRewriter, RewriterExt};
-  use crate::Request;
-
-  #[test]
-  fn test_rewrite_sequence() {
-    let first = PathRewriter::new("^(/index.php)$", "/foo$1").expect("should be valid regex");
-
-    let second = PathRewriter::new("foo/index", "foo/bar").expect("should be valid regex");
-
-    let sequence = first.then(second);
-
-    let request = Request::builder()
-      .url("http://example.com/index.php")
-      .header("TEST", "foo")
-      .build()
-      .expect("should build request");
-
-    assert_eq!(
-      sequence.rewrite(request).url().path(),
-      "/foo/bar.php".to_string()
-    );
-  }
-}

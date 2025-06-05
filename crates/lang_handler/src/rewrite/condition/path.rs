@@ -26,24 +26,23 @@ impl PathCondition {
 impl Condition for PathCondition {
   /// A PathCondition matches a request if the path segment of the request url
   /// matches the pattern given when constructing the PathCondition.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// # use lang_handler::rewrite::{Condition, PathCondition};
+  /// # use lang_handler::Request;
+  /// let condition = PathCondition::new("^/index.php$")
+  ///   .expect("should be valid regex");
+  ///
+  /// let request = Request::builder()
+  ///   .url("http://example.com/index.php")
+  ///   .build()
+  ///   .expect("should build request");
+  ///
+  /// assert!(condition.matches(&request));
+  /// ```
   fn matches(&self, request: &Request) -> bool {
     self.pattern.is_match(request.url().path())
-  }
-}
-
-#[cfg(test)]
-mod test {
-  use super::*;
-
-  #[test]
-  fn test_path_condition() {
-    let condition = PathCondition::new("^/index.php$").expect("regex should be valid");
-
-    let request = Request::builder()
-      .url("http://example.com/index.php")
-      .build()
-      .expect("request should build");
-
-    assert!(condition.matches(&request));
   }
 }

@@ -26,8 +26,8 @@ impl ExistenceCondition {
 }
 
 impl Condition for ExistenceCondition {
-  /// A NonExistenceCondition matches a request if the path segment of the
-  /// request url does not exist in the provided base directory.
+  /// An ExistenceCondition matches a request if the path segment of the
+  /// request url exists in the provided base directory.
   ///
   /// # Examples
   ///
@@ -44,9 +44,10 @@ impl Condition for ExistenceCondition {
   /// assert_eq!(condition.matches(&request), false);
   /// ```
   fn matches(&self, request: &Request) -> bool {
+    let path = request.url().path();
     self
       .0
-      .join(request.url().path().strip_prefix("/").unwrap())
+      .join(path.strip_prefix("/").unwrap_or(path))
       .canonicalize()
       .is_ok()
   }
@@ -93,9 +94,10 @@ impl Condition for NonExistenceCondition {
   /// assert!(condition.matches(&request));
   /// ```
   fn matches(&self, request: &Request) -> bool {
+    let path = request.url().path();
     self
       .0
-      .join(request.url().path().strip_prefix("/").unwrap())
+      .join(path.strip_prefix("/").unwrap_or(path))
       .canonicalize()
       .is_err()
   }
@@ -104,36 +106,16 @@ impl Condition for NonExistenceCondition {
 #[cfg(test)]
 mod test {
   use super::*;
-
-  use std::{
-    env::current_dir,
-    fs::File,
-    io::Write,
-    path::{Path, PathBuf},
-  };
-
-  struct TempFile(PathBuf);
-
-  impl TempFile {
-    fn new<P: AsRef<Path>, S: Into<String>>(path: P, contents: S) -> Self {
-      let mut file = File::create(path.as_ref()).unwrap();
-      file.write_all(contents.into().as_bytes()).unwrap();
-      Self(path.as_ref().to_owned())
-    }
-  }
-
-  impl Drop for TempFile {
-    fn drop(&mut self) {
-      std::fs::remove_file(&self.0).unwrap();
-    }
-  }
+  use crate::MockRoot;
 
   #[test]
   fn test_existence_condition() {
-    let _temp = TempFile::new("exists.php", "<?php echo \"Hello, world!\"; ?>");
+    let docroot = MockRoot::builder()
+      .file("exists.php", "<?php echo \"Hello, world!\"; ?>")
+      .build()
+      .expect("should prepare docroot");
 
-    let cwd = current_dir().unwrap();
-    let condition = ExistenceCondition::new(cwd);
+    let condition = ExistenceCondition::new(docroot.clone());
 
     let request = Request::builder()
       .url("http://example.com/exists.php")
@@ -145,8 +127,9 @@ mod test {
 
   #[test]
   fn test_non_existence_condition() {
-    let cwd = current_dir().unwrap();
-    let condition = NonExistenceCondition::new(cwd);
+    let docroot = MockRoot::builder().build().expect("should prepare docroot");
+
+    let condition = NonExistenceCondition::new(docroot.clone());
 
     let request = Request::builder()
       .url("http://example.com/does_not_exist.php")

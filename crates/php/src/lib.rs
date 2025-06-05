@@ -14,4 +14,4 @@ pub use lang_handler::{rewrite, Handler, Header, Headers, Request, RequestBuilde
 pub use embed::Embed;
 pub use exception::{EmbedRequestError, EmbedStartError};
 pub use request_context::RequestContext;
-pub use test::MockRoot;
+pub use test::{MockRoot, MockRootBuilder};

@@ -37,7 +37,7 @@ pub trait ConditionExt: Condition {
   /// let header = HeaderCondition::new("TEST", "^foo$")
   ///   .expect("should be valid regex");
   ///
-  /// let path_and_header = path.and(header);
+  /// let condition = path.and(header);
   ///
   /// let request = Request::builder()
   ///   .url("http://example.com/index.php")
@@ -45,7 +45,23 @@ pub trait ConditionExt: Condition {
   ///   .build()
   ///   .expect("should build request");
   ///
-  /// assert!(path_and_header.matches(&request));
+  /// assert!(condition.matches(&request));
+  /// #
+  /// # // SHould _not_ match if either condition does not match
+  /// # let only_header = Request::builder()
+  /// #   .url("http://example.com/nope.php")
+  /// #   .header("TEST", "foo")
+  /// #   .build()
+  /// #   .expect("request should build");
+  /// #
+  /// # assert!(!condition.matches(&only_header));
+  /// #
+  /// # let only_url = Request::builder()
+  /// #   .url("http://example.com/index.php")
+  /// #   .build()
+  /// #   .expect("request should build");
+  /// #
+  /// # assert!(!condition.matches(&only_url));
   /// ```
   fn and<C>(self: Box<Self>, other: Box<C>) -> Box<ConditionGroup<Self, C>>
   where
@@ -69,14 +85,30 @@ pub trait ConditionExt: Condition {
   /// let header = HeaderCondition::new("TEST", "^foo$")
   ///   .expect("should be valid regex");
   ///
-  /// let path_or_header = path.or(header);
+  /// let condition = path.or(header);
   ///
   /// let request = Request::builder()
   ///   .url("http://example.com/index.php")
   ///   .build()
   ///   .expect("should build request");
   ///
-  /// assert!(path_or_header.matches(&request));
+  /// assert!(condition.matches(&request));
+  /// #
+  /// # // Should match if one condition does not
+  /// # let only_header = Request::builder()
+  /// #   .url("http://example.com/nope.php")
+  /// #   .header("TEST", "foo")
+  /// #   .build()
+  /// #   .expect("request should build");
+  /// #
+  /// # assert!(condition.matches(&only_header));
+  /// #
+  /// # let only_url = Request::builder()
+  /// #   .url("http://example.com/index.php")
+  /// #   .build()
+  /// #   .expect("request should build");
+  /// #
+  /// # assert!(condition.matches(&only_url));
   /// ```
   fn or<C>(self: Box<Self>, other: Box<C>) -> Box<ConditionGroup<Self, C>>
   where
