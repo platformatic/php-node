@@ -276,7 +276,7 @@ impl Request {
 }
 
 /// Errors which may be produced when building a Request from a RequestBuilder.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub enum RequestBuilderException {
   /// Url is required
   UrlMissing,

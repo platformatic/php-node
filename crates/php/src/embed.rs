@@ -189,7 +189,9 @@ impl Handler for Embed {
     // Apply request rewriting rules
     let mut request = request.clone();
     if let Some(rewriter) = &self.rewriter {
-      request = rewriter.rewrite(request)
+      request = rewriter
+        .rewrite(request, &docroot)
+        .map_err(EmbedRequestError::RequestRewriteError)?;
     }
 
     // Initialize the SAPI module

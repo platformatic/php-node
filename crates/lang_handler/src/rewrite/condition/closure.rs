@@ -1,16 +1,20 @@
+use std::path::Path;
+
 use super::{Condition, Request};
 
 impl<F> Condition for F
 where
-  F: Fn(&Request) -> bool + Sync + Send,
+  F: Fn(&Request, &Path) -> bool + Sync + Send,
 {
   /// Matches if calling the Fn(&Request) with the given request returns true
   ///
   /// # Examples
   ///
   /// ```
+  /// # use std::path::Path;
   /// # use lang_handler::{Request, rewrite::Condition};
-  /// let condition = |request: &Request| {
+  /// # let docroot = std::env::temp_dir();
+  /// let condition = |request: &Request, _docroot: &Path| -> bool {
   ///   request.url().path().contains("/foo")
   /// };
   ///
@@ -19,9 +23,9 @@ where
   ///   .build()
   ///   .expect("request should build");
   ///
-  /// assert_eq!(condition.matches(&request), false);
+  /// assert!(!condition.matches(&request, &docroot));
   /// ```
-  fn matches(&self, request: &Request) -> bool {
-    self(request)
+  fn matches(&self, request: &Request, docroot: &Path) -> bool {
+    self(request, docroot)
   }
 }

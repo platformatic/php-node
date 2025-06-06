@@ -1,20 +1,23 @@
-use super::{Request, Rewriter};
+use std::path::Path;
+
+use super::{Request, RequestBuilderException, Rewriter};
 
 impl<F> Rewriter for F
 where
-  F: Fn(Request) -> Request + Sync + Send,
+  F: Fn(Request, &Path) -> Result<Request, RequestBuilderException> + Sync + Send,
 {
   /// Rewrites the request by calling the Fn(&Request) with the given request
   ///
   /// # Examples
   ///
   /// ```
+  /// # use std::path::Path;
   /// # use lang_handler::{Request, rewrite::Rewriter};
-  /// let rewriter = |request: Request| {
+  /// # let docroot = std::env::temp_dir();
+  /// let rewriter = |request: Request, docroot: &Path| {
   ///   request.extend()
   ///     .url("http://example.com/foo/bar")
   ///     .build()
-  ///     .expect("should build new request")
   /// };
   ///
   /// let request = Request::builder()
@@ -22,12 +25,12 @@ where
   ///   .build()
   ///   .expect("request should build");
   ///
-  /// assert_eq!(
-  ///   rewriter.rewrite(request).url().path(),
-  ///   "/foo/bar".to_string()
-  /// );
+  /// let new_request = rewriter.rewrite(request, &docroot)
+  ///   .expect("rewriting should succeed");
+  ///
+  /// assert_eq!(new_request.url().path(), "/foo/bar".to_string());
   /// ```
-  fn rewrite(&self, request: Request) -> Request {
-    self(request)
+  fn rewrite(&self, request: Request, docroot: &Path) -> Result<Request, RequestBuilderException> {
+    self(request, docroot)
   }
 }

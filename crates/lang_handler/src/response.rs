@@ -7,8 +7,7 @@ use super::Headers;
 /// # Example
 ///
 /// ```
-/// use lang_handler::{Response, ResponseBuilder};
-///
+/// # use lang_handler::{Response, ResponseBuilder};
 /// let response = Response::builder()
 ///   .status(200)
 ///   .header("Content-Type", "text/plain")
@@ -35,8 +34,7 @@ impl Response {
   /// # Example
   ///
   /// ```
-  /// use lang_handler::{Response, Headers};
-  ///
+  /// # use lang_handler::{Response, Headers};
   /// let mut headers = Headers::new();
   /// headers.set("Content-Type", "text/plain");
   ///
@@ -73,8 +71,7 @@ impl Response {
   /// # Example
   ///
   /// ```
-  /// use lang_handler::Response;
-  ///
+  /// # use lang_handler::Response;
   /// let response = Response::builder()
   ///   .status(200)
   ///   .header("Content-Type", "text/plain")
@@ -94,8 +91,7 @@ impl Response {
   /// # Example
   ///
   /// ```
-  /// use lang_handler::{Response, ResponseBuilder};
-  ///
+  /// # use lang_handler::{Response, ResponseBuilder};
   /// let response = Response::builder()
   ///   .status(200)
   ///   .header("Content-Type", "text/plain")
@@ -119,8 +115,7 @@ impl Response {
   /// # Example
   ///
   /// ```
-  /// use lang_handler::Response;
-  ///
+  /// # use lang_handler::Response;
   /// let response = Response::builder()
   ///   .status(200)
   ///   .build();
@@ -131,13 +126,12 @@ impl Response {
     self.status
   }
 
-  /// Returns the headers of the response.
+  /// Returns the [`Headers`] of the response.
   ///
   /// # Example
   ///
   /// ```
-  /// use lang_handler::{Response, Headers};
-  ///
+  /// # use lang_handler::{Response, Headers};
   /// let response = Response::builder()
   ///   .status(200)
   ///   .header("Content-Type", "text/plain")
@@ -154,8 +148,7 @@ impl Response {
   /// # Example
   ///
   /// ```
-  /// use lang_handler::Response;
-  ///
+  /// # use lang_handler::Response;
   /// let response = Response::builder()
   ///   .status(200)
   ///   .body("Hello, World!")
@@ -172,8 +165,7 @@ impl Response {
   /// # Example
   ///
   /// ```
-  /// use lang_handler::Response;
-  ///
+  /// # use lang_handler::Response;
   /// let response = Response::builder()
   ///   .status(200)
   ///   .log("log")
@@ -190,8 +182,7 @@ impl Response {
   /// # Example
   ///
   /// ```
-  /// use lang_handler::Response;
-  ///
+  /// # use lang_handler::Response;
   /// let response = Response::builder()
   ///   .status(200)
   ///   .exception("exception")
@@ -209,8 +200,7 @@ impl Response {
 /// # Example
 ///
 /// ```
-/// use lang_handler::{Response, ResponseBuilder};
-///
+/// # use lang_handler::{Response, ResponseBuilder};
 /// let response = Response::builder()
 ///   .status(200)
 ///   .header("Content-Type", "text/plain")
@@ -236,8 +226,7 @@ impl ResponseBuilder {
   /// # Example
   ///
   /// ```
-  /// use lang_handler::ResponseBuilder;
-  ///
+  /// # use lang_handler::ResponseBuilder;
   /// let builder = ResponseBuilder::new();
   /// ```
   pub fn new() -> Self {
@@ -250,13 +239,36 @@ impl ResponseBuilder {
     }
   }
 
+  /// Builds the response.
+  ///
+  /// # Example
+  ///
+  /// ```
+  /// # use lang_handler::ResponseBuilder;
+  /// let response = ResponseBuilder::new()
+  ///   .build();
+  ///
+  /// assert_eq!(response.status(), 200);
+  /// assert_eq!(response.body(), "");
+  /// assert_eq!(response.log(), "");
+  /// assert_eq!(response.exception(), None);
+  /// ```
+  pub fn build(&self) -> Response {
+    Response {
+      status: self.status.unwrap_or(200),
+      headers: self.headers.clone(),
+      body: self.body.clone().freeze(),
+      log: self.log.clone().freeze(),
+      exception: self.exception.clone(),
+    }
+  }
+
   /// Creates a new response builder that extends the given response.
   ///
   /// # Example
   ///
   /// ```
-  /// use lang_handler::{Response, ResponseBuilder};
-  ///
+  /// # use lang_handler::{Response, ResponseBuilder};
   /// let response = Response::builder()
   ///   .status(200)
   ///   .header("Content-Type", "text/plain")
@@ -286,8 +298,7 @@ impl ResponseBuilder {
   /// # Example
   ///
   /// ```
-  /// use lang_handler::ResponseBuilder;
-  ///
+  /// # use lang_handler::ResponseBuilder;
   /// let response = ResponseBuilder::new()
   ///   .status(300)
   ///   .build();
@@ -304,8 +315,7 @@ impl ResponseBuilder {
   /// # Example
   ///
   /// ```
-  /// use lang_handler::ResponseBuilder;
-  ///
+  /// # use lang_handler::ResponseBuilder;
   /// let response = ResponseBuilder::new()
   ///   .header("Content-Type", "text/plain")
   ///   .build();
@@ -326,8 +336,7 @@ impl ResponseBuilder {
   /// # Example
   ///
   /// ```
-  /// use lang_handler::ResponseBuilder;
-  ///
+  /// # use lang_handler::ResponseBuilder;
   /// let builder = ResponseBuilder::new()
   ///   .body("Hello, World!")
   ///   .build();
@@ -339,6 +348,20 @@ impl ResponseBuilder {
     self
   }
 
+  /// Appends to the body of the response.
+  ///
+  /// # Example
+  ///
+  /// ```
+  /// use lang_handler::ResponseBuilder;
+  ///
+  /// let response = ResponseBuilder::new()
+  ///   .body("Hello, ")
+  ///   .body_write("World!")
+  ///   .build();
+  ///
+  /// assert_eq!(response.body(), "Hello, World!");
+  /// ```
   pub fn body_write<B: Into<BytesMut>>(&mut self, body: B) -> &mut Self {
     self.body.extend_from_slice(&body.into());
     self
@@ -349,8 +372,7 @@ impl ResponseBuilder {
   /// # Example
   ///
   /// ```
-  /// use lang_handler::ResponseBuilder;
-  ///
+  /// # use lang_handler::ResponseBuilder;
   /// let builder = ResponseBuilder::new()
   ///   .log("log")
   ///   .build();
@@ -362,6 +384,19 @@ impl ResponseBuilder {
     self
   }
 
+  /// Appends to the log of the response.
+  ///
+  /// # Example
+  ///
+  /// ```
+  /// # use lang_handler::ResponseBuilder;
+  /// let builder = ResponseBuilder::new()
+  ///   .log_write("logs")
+  ///   .log_write("more logs")
+  ///   .build();
+  ///
+  /// assert_eq!(builder.log(), "logs\nmore logs\n");
+  /// ```
   pub fn log_write<L: Into<BytesMut>>(&mut self, log: L) -> &mut Self {
     self.log.extend_from_slice(&log.into());
     self.log.extend_from_slice(b"\n");
@@ -373,8 +408,7 @@ impl ResponseBuilder {
   /// # Example
   ///
   /// ```
-  /// use lang_handler::ResponseBuilder;
-  ///
+  /// # use lang_handler::ResponseBuilder;
   /// let builder = ResponseBuilder::new()
   ///   .exception("exception")
   ///   .build();
@@ -384,31 +418,6 @@ impl ResponseBuilder {
   pub fn exception<E: Into<String>>(&mut self, exception: E) -> &mut Self {
     self.exception = Some(exception.into());
     self
-  }
-
-  /// Builds the response.
-  ///
-  /// # Example
-  ///
-  /// ```
-  /// use lang_handler::ResponseBuilder;
-  ///
-  /// let response = ResponseBuilder::new()
-  ///   .build();
-  ///
-  /// assert_eq!(response.status(), 200);
-  /// assert_eq!(response.body(), "");
-  /// assert_eq!(response.log(), "");
-  /// assert_eq!(response.exception(), None);
-  /// ```
-  pub fn build(&self) -> Response {
-    Response {
-      status: self.status.unwrap_or(200),
-      headers: self.headers.clone(),
-      body: self.body.clone().freeze(),
-      log: self.log.clone().freeze(),
-      exception: self.exception.clone(),
-    }
   }
 }
 

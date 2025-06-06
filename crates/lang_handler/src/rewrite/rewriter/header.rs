@@ -1,6 +1,8 @@
+use std::path::Path;
+
 use regex::{Error, Regex};
 
-use super::{Request, Rewriter};
+use super::{Request, RequestBuilderException, Rewriter};
 
 /// Rewrite a request header using a given pattern and replacement.
 pub struct HeaderRewriter {
@@ -47,6 +49,7 @@ impl Rewriter for HeaderRewriter {
   /// ```
   /// # use lang_handler::rewrite::{Rewriter, HeaderRewriter};
   /// # use lang_handler::Request;
+  /// # let docroot = std::env::temp_dir();
   /// let rewriter = HeaderRewriter::new("TEST", "(foo)", "${1}bar")
   ///   .expect("should be valid regex");
   ///
@@ -56,12 +59,15 @@ impl Rewriter for HeaderRewriter {
   ///   .build()
   ///   .expect("should build request");
   ///
+  /// let new_request = rewriter.rewrite(request, &docroot)
+  ///   .expect("should rewrite request");
+  ///
   /// assert_eq!(
-  ///   rewriter.rewrite(request).headers().get("TEST"),
+  ///   new_request.headers().get("TEST"),
   ///   Some("foobar".to_string())
   /// );
   /// ```
-  fn rewrite(&self, request: Request) -> Request {
+  fn rewrite(&self, request: Request, _docroot: &Path) -> Result<Request, RequestBuilderException> {
     let HeaderRewriter {
       name,
       pattern,
@@ -69,12 +75,11 @@ impl Rewriter for HeaderRewriter {
     } = self;
 
     match request.headers().get(name) {
-      None => request,
+      None => Ok(request),
       Some(value) => request
         .extend()
         .header(name, pattern.replace(&value, replacement.clone()))
-        .build()
-        .unwrap_or(request),
+        .build(),
     }
   }
 }

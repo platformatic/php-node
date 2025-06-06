@@ -175,19 +175,13 @@ test('Accept rewriter', async (t) => {
   })
   t.teardown(() => mockroot.clean())
 
-  const rewrite = new Rewriter([
+  const rewriter = new Rewriter([
     {
       conditions: [
-        {
-          type: 'path',
-          args: ['^/rewrite_me$']
-        }
+        { type: 'path', args: ['^/rewrite_me$'] }
       ],
       rewriters: [
-        {
-          type: 'path',
-          args: ['^/rewrite_me$', '/index.php']
-        }
+        { type: 'path', args: ['^/rewrite_me$', '/index.php'] }
       ]
     }
   ])
@@ -196,7 +190,7 @@ test('Accept rewriter', async (t) => {
     argv: process.argv,
     docroot: mockroot.path,
     throwRequestErrors: true,
-    rewrite
+    rewriter
   })
 
   const req = new Request({

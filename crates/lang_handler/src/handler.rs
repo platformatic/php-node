@@ -23,6 +23,7 @@ use super::{Request, Response};
 ///   }
 /// }
 pub trait Handler {
+  /// The type of error that can occur while handling a request.
   type Error;
 
   /// Handles an HTTP request.

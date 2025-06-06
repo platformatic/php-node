@@ -1,14 +1,15 @@
-use std::str::FromStr;
+use std::{path::Path, str::FromStr};
 
 // use napi::bindgen_prelude::*;
 use napi::{Error, Result};
 
 use php::{
   rewrite::{
-    Condition, ConditionExt, HeaderCondition, HeaderRewriter, PathCondition, PathRewriter,
-    Rewriter, RewriterExt,
+    Condition, ConditionExt, ExistenceCondition, HeaderCondition, HeaderRewriter, HrefRewriter,
+    MethodCondition, MethodRewriter, NonExistenceCondition, PathCondition, PathRewriter, Rewriter,
+    RewriterExt,
   },
-  Request,
+  Request, RequestBuilderException,
 };
 
 use crate::PhpRequest;
@@ -18,28 +19,38 @@ use crate::PhpRequest;
 //
 
 #[napi(object)]
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct PhpRewriteCondOptions {
   #[napi(js_name = "type")]
   pub cond_type: String,
-  pub args: Vec<String>,
+  pub args: Option<Vec<String>>,
 }
 
 pub enum PhpRewriteCond {
-  Path(String),
+  Exists,
   Header(String, String),
+  Method(String),
+  NotExists,
+  Path(String),
 }
 
 impl Condition for PhpRewriteCond {
-  fn matches(&self, request: &php::Request) -> bool {
-    let condition: Box<dyn Condition> = match self {
-      PhpRewriteCond::Path(pattern) => PathCondition::new(pattern.as_str()).unwrap(),
+  fn matches(&self, request: &php::Request, docroot: &Path) -> bool {
+    match self {
+      PhpRewriteCond::Exists => ExistenceCondition.matches(request, docroot),
       PhpRewriteCond::Header(name, pattern) => {
-        HeaderCondition::new(name.as_str(), pattern.as_str()).unwrap()
+        HeaderCondition::new(name.as_str(), pattern.as_str())
+          .map(|v| v.matches(request, docroot))
+          .unwrap_or_default()
       }
-    };
-
-    condition.matches(request)
+      PhpRewriteCond::Method(pattern) => MethodCondition::new(pattern.as_str())
+        .map(|v| v.matches(request, docroot))
+        .unwrap_or_default(),
+      PhpRewriteCond::NotExists => NonExistenceCondition.matches(request, docroot),
+      PhpRewriteCond::Path(pattern) => PathCondition::new(pattern.as_str())
+        .map(|v| v.matches(request, docroot))
+        .unwrap_or_default(),
+    }
   }
 }
 
@@ -49,17 +60,36 @@ impl TryFrom<&PhpRewriteCondOptions> for Box<PhpRewriteCond> {
   fn try_from(value: &PhpRewriteCondOptions) -> std::result::Result<Self, Self::Error> {
     let PhpRewriteCondOptions { cond_type, args } = value;
     let cond_type = cond_type.to_lowercase();
+    let args = args.to_owned().unwrap_or(vec![]);
     match cond_type.as_str() {
-      "path" => match args.len() {
-        1 => Ok(Box::new(PhpRewriteCond::Path(args[0].to_owned()))),
-        _ => Err(Error::from_reason("Wrong number of parameters")),
-      },
+      "exists" => {
+        if args.is_empty() {
+          Ok(Box::new(PhpRewriteCond::Exists))
+        } else {
+          Err(Error::from_reason("Wrong number of parameters"))
+        }
+      }
       "header" => match args.len() {
         2 => {
           let name = args[0].to_owned();
           let pattern = args[1].to_owned();
           Ok(Box::new(PhpRewriteCond::Header(name, pattern)))
         }
+        _ => Err(Error::from_reason("Wrong number of parameters")),
+      },
+      "method" => match args.len() {
+        1 => Ok(Box::new(PhpRewriteCond::Method(args[0].to_owned()))),
+        _ => Err(Error::from_reason("Wrong number of parameters")),
+      },
+      "not_exists" | "not-exists" => {
+        if args.is_empty() {
+          Ok(Box::new(PhpRewriteCond::NotExists))
+        } else {
+          Err(Error::from_reason("Wrong number of parameters"))
+        }
+      }
+      "path" => match args.len() {
+        1 => Ok(Box::new(PhpRewriteCond::Path(args[0].to_owned()))),
         _ => Err(Error::from_reason("Wrong number of parameters")),
       },
       _ => Err(Error::from_reason(format!(
@@ -75,7 +105,7 @@ impl TryFrom<&PhpRewriteCondOptions> for Box<PhpRewriteCond> {
 //
 
 #[napi(object)]
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct PhpRewriterOptions {
   #[napi(js_name = "type")]
   pub rewriter_type: String,
@@ -83,22 +113,40 @@ pub struct PhpRewriterOptions {
 }
 
 pub enum PhpRewriterType {
-  Path(String, String),
   Header(String, String, String),
+  Href(String, String),
+  Method(String, String),
+  Path(String, String),
 }
 
 impl Rewriter for PhpRewriterType {
-  fn rewrite(&self, request: Request) -> Request {
-    let rewriter: Box<dyn Rewriter> = match self {
+  fn rewrite(
+    &self,
+    request: Request,
+    docroot: &Path,
+  ) -> std::result::Result<Request, RequestBuilderException> {
+    match self {
       PhpRewriterType::Path(pattern, replacement) => {
-        PathRewriter::new(pattern.as_str(), replacement.as_str()).unwrap()
+        PathRewriter::new(pattern.as_str(), replacement.as_str())
+          .map(|v| v.rewrite(request.clone(), docroot))
+          .unwrap_or(Ok(request))
+      }
+      PhpRewriterType::Href(pattern, replacement) => {
+        HrefRewriter::new(pattern.as_str(), replacement.as_str())
+          .map(|v| v.rewrite(request.clone(), docroot))
+          .unwrap_or(Ok(request))
+      }
+      PhpRewriterType::Method(pattern, replacement) => {
+        MethodRewriter::new(pattern.as_str(), replacement.as_str())
+          .map(|v| v.rewrite(request.clone(), docroot))
+          .unwrap_or(Ok(request))
       }
       PhpRewriterType::Header(name, pattern, replacement) => {
-        HeaderRewriter::new(name.as_str(), pattern.as_str(), replacement.as_str()).unwrap()
+        HeaderRewriter::new(name.as_str(), pattern.as_str(), replacement.as_str())
+          .map(|v| v.rewrite(request.clone(), docroot))
+          .unwrap_or(Ok(request))
       }
-    };
-
-    rewriter.rewrite(request)
+    }
   }
 }
 
@@ -112,14 +160,6 @@ impl TryFrom<&PhpRewriterOptions> for Box<PhpRewriterType> {
     } = value;
     let rewriter_type = rewriter_type.to_lowercase();
     match rewriter_type.as_str() {
-      "path" => match args.len() {
-        2 => {
-          let pattern = args[0].to_owned();
-          let replacement = args[1].to_owned();
-          Ok(Box::new(PhpRewriterType::Path(pattern, replacement)))
-        }
-        _ => Err(Error::from_reason("Wrong number of parameters")),
-      },
       "header" => match args.len() {
         3 => {
           let name = args[0].to_owned();
@@ -130,6 +170,30 @@ impl TryFrom<&PhpRewriterOptions> for Box<PhpRewriterType> {
             pattern,
             replacement,
           )))
+        }
+        _ => Err(Error::from_reason("Wrong number of parameters")),
+      },
+      "href" => match args.len() {
+        2 => {
+          let pattern = args[0].to_owned();
+          let replacement = args[1].to_owned();
+          Ok(Box::new(PhpRewriterType::Href(pattern, replacement)))
+        }
+        _ => Err(Error::from_reason("Wrong number of parameters")),
+      },
+      "method" => match args.len() {
+        2 => {
+          let pattern = args[0].to_owned();
+          let replacement = args[1].to_owned();
+          Ok(Box::new(PhpRewriterType::Method(pattern, replacement)))
+        }
+        _ => Err(Error::from_reason("Wrong number of parameters")),
+      },
+      "path" => match args.len() {
+        2 => {
+          let pattern = args[0].to_owned();
+          let replacement = args[1].to_owned();
+          Ok(Box::new(PhpRewriterType::Path(pattern, replacement)))
         }
         _ => Err(Error::from_reason("Wrong number of parameters")),
       },
@@ -165,18 +229,22 @@ impl FromStr for OperationType {
 }
 
 #[napi(object)]
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct PhpConditionalRewriterOptions {
   pub operation: Option<String>,
-  pub conditions: Vec<PhpRewriteCondOptions>,
+  pub conditions: Option<Vec<PhpRewriteCondOptions>>,
   pub rewriters: Vec<PhpRewriterOptions>,
 }
 
 pub struct PhpConditionalRewriter(Box<dyn Rewriter>);
 
 impl Rewriter for PhpConditionalRewriter {
-  fn rewrite(&self, request: Request) -> Request {
-    self.0.rewrite(request)
+  fn rewrite(
+    &self,
+    request: Request,
+    docroot: &Path,
+  ) -> std::result::Result<Request, RequestBuilderException> {
+    self.0.rewrite(request, docroot)
   }
 }
 
@@ -184,18 +252,16 @@ impl TryFrom<&PhpConditionalRewriterOptions> for Box<PhpConditionalRewriter> {
   type Error = Error;
 
   fn try_from(value: &PhpConditionalRewriterOptions) -> std::result::Result<Self, Self::Error> {
-    let PhpConditionalRewriterOptions {
-      operation,
-      rewriters,
-      conditions,
-    } = value;
+    let value = value.clone();
 
-    let operation = operation
+    let operation = value
+      .operation
       .clone()
       .unwrap_or("and".into())
       .parse::<OperationType>()?;
 
-    let rewriter = rewriters
+    let rewriter = value
+      .rewriters
       .iter()
       .try_fold(None::<Box<dyn Rewriter>>, |state, next| {
         let converted: std::result::Result<Box<PhpRewriterType>, Error> = next.try_into();
@@ -208,9 +274,9 @@ impl TryFrom<&PhpConditionalRewriterOptions> for Box<PhpConditionalRewriter> {
         })
       })?;
 
-    let condition = conditions
-      .iter()
-      .try_fold(None::<Box<dyn Condition>>, |state, next| {
+    let condition = value.conditions.unwrap_or_default().iter().try_fold(
+      None::<Box<dyn Condition>>,
+      |state, next| {
         let converted: std::result::Result<Box<PhpRewriteCond>, Error> = next.try_into();
         converted.map(|converted| {
           let res: Option<Box<dyn Condition>> = match state {
@@ -222,7 +288,8 @@ impl TryFrom<&PhpConditionalRewriterOptions> for Box<PhpConditionalRewriter> {
           };
           res
         })
-      })?;
+      },
+    )?;
 
     match rewriter {
       None => Err(Error::from_reason("No rewriters provided")),
@@ -249,10 +316,15 @@ impl PhpRewriter {
   }
 
   #[napi]
-  pub fn rewrite(&self, request: &PhpRequest) -> Result<PhpRequest> {
+  pub fn rewrite(&self, request: &PhpRequest, docroot: String) -> Result<PhpRequest> {
     let rewriter = self.into_rewriter()?;
+    let docroot = Path::new(&docroot);
     Ok(PhpRequest {
-      request: rewriter.rewrite(request.request.to_owned()),
+      request: rewriter
+        .rewrite(request.request.to_owned(), docroot)
+        .map_err(|err| {
+          Error::from_reason(format!("Failed to rewrite request: {}", err.to_string()))
+        })?,
     })
   }
 

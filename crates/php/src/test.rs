@@ -1,16 +1,18 @@
 use std::{
   collections::HashMap,
   env::temp_dir,
-  fs::{create_dir_all, remove_dir_all, File},
-  io::{Error, Write},
+  fs::{create_dir_all, File},
+  io::{Error, ErrorKind, Write},
   ops::{Deref, DerefMut},
   path::{Path, PathBuf},
 };
 
+/// A mock document root for testing purposes.
 pub struct MockRoot(PathBuf);
 
 impl MockRoot {
-  pub(crate) fn new<D, H>(docroot: D, files: H) -> Result<Self, Error>
+  /// Create a new MockRoot with the given document root and files.
+  pub fn new<D, H>(docroot: D, files: H) -> Result<Self, Error>
   where
     D: AsRef<Path>,
     H: Into<HashMap<PathBuf, String>>,
@@ -32,19 +34,25 @@ impl MockRoot {
     }
 
     // This unwrap should be safe due to creating the docroot base dir above.
-    Ok(Self(docroot.canonicalize().unwrap()))
+    Ok(Self(
+      docroot
+        .canonicalize()
+        .map_err(|err| Error::new(ErrorKind::Other, err))?,
+    ))
   }
 
+  /// Create a new MockRoot with the given document root and files.
   pub fn builder() -> MockRootBuilder {
     MockRootBuilder::default()
   }
 }
 
-impl Drop for MockRoot {
-  fn drop(&mut self) {
-    remove_dir_all(&self.0).ok();
-  }
-}
+// TODO: Somehow this happens too early?
+// impl Drop for MockRoot {
+//   fn drop(&mut self) {
+//     remove_dir_all(&self.0).ok();
+//   }
+// }
 
 impl Deref for MockRoot {
   type Target = PathBuf;
@@ -60,17 +68,26 @@ impl DerefMut for MockRoot {
   }
 }
 
+impl AsRef<Path> for MockRoot {
+  fn as_ref(&self) -> &Path {
+    self.0.as_ref()
+  }
+}
+
+/// A builder for creating a MockRoot with a specified document root and files.
 #[derive(Debug)]
 pub struct MockRootBuilder(PathBuf, HashMap<PathBuf, String>);
 
 impl MockRootBuilder {
-  pub(crate) fn new<D>(docroot: D) -> Self
+  /// Create a new MockRootBuilder with the specified document root.
+  pub fn new<D>(docroot: D) -> Self
   where
     D: AsRef<Path>,
   {
     Self(docroot.as_ref().to_owned(), HashMap::new())
   }
 
+  /// Add a file to the mock document root.
   pub fn file<P, C>(mut self, path: P, contents: C) -> MockRootBuilder
   where
     P: AsRef<Path>,
@@ -83,6 +100,7 @@ impl MockRootBuilder {
     self
   }
 
+  /// Build the MockRoot with the specified document root and files.
   pub fn build(self) -> Result<MockRoot, Error> {
     MockRoot::new(self.0, self.1)
   }

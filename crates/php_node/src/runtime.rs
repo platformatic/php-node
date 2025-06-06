@@ -18,7 +18,7 @@ pub struct PhpOptions {
   /// Throw request errors
   pub throw_request_errors: Option<bool>,
   /// Request rewriter
-  pub rewrite: Option<Reference<PhpRewriter>>,
+  pub rewriter: Option<Reference<PhpRewriter>>,
 }
 
 /// A PHP instance.
@@ -62,7 +62,7 @@ impl PhpRuntime {
       docroot,
       argv,
       throw_request_errors,
-      rewrite,
+      rewriter,
     } = options.unwrap_or_default();
 
     let docroot = docroot
@@ -73,7 +73,7 @@ impl PhpRuntime {
       })
       .map_err(|_| Error::from_reason("Could not determine docroot"))?;
 
-    let rewriter = if let Some(found) = rewrite {
+    let rewriter = if let Some(found) = rewriter {
       Some(found.into_rewriter()?)
     } else {
       None

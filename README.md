@@ -62,6 +62,7 @@ console.log(response.body.toString())
   * `docroot` {String} Document root for PHP. **Default:** process.cwd()
   * `throwRequestErrors` {Boolean} Throw request errors rather than returning
     responses with error codes. **Default:** false
+  * `rewriter` {Rewriter} Optional rewrite rules. **Default:** `undefined`
 * Returns: {Php}
 
 Construct a new PHP instance to which to dispatch requests.
@@ -560,9 +561,111 @@ headers.forEach((value, name, headers) => {
 })
 ```
 
+### `new Rewriter(input)`
+
+* `rules` {Array} The set of rewriting rules to apply to each request
+  * `operation` {String} Operation type (`and` or `or`) **Default:** `and`
+  * `conditions` {Array} Conditions to match against the request
+    * `type` {String} Condition type
+    * `args` {String} Arguments to pass to condition constructor
+  * `rewriters` {Array} Rewrites to apply if the conditions match
+    * `type` {String} Rewriter type
+    * `args` {String} Arguments to pass to rewriter constructor
+* Returns: {Rewriter}
+
+Construct a Rewriter to rewrite requests before they are dispatched to PHP.
+
+```js
+import { Rewriter } from '@platformatic/php-node'
+
+const rewriter = new Rewriter([{
+  conditions: [{
+    type: 'header',
+    args: ['User-Agent', '^(Mozilla|Chrome)']
+  }],
+  rewriters: [{
+    type: 'path',
+    args: ['^/old-path/(.*)$', '/new-path/$1']
+  }]
+}])
+```
+
+#### Conditions
+
+There are several types of conditions which may be used to match against the
+request. Each condition type has a set of arguments which are passed to the
+constructor of the condition. The condition will be evaluated against the
+request and if it matches, the rewriters will be applied.
+
+The available condition types are:
+
+- `exists` Matches if request path exists in docroot.
+- `not_exists` Matches if request path does not exist in docroot.
+- `header(name, pattern)` Matches named header against a pattern.
+  - `name` {String} The name of the header to match.
+  - `pattern` {String} The regex pattern to match against the header value.
+- `method(pattern)` Matches request method against a pattern.
+  - `pattern` {String} The regex pattern to match against the HTTP method.
+- `path(pattern)`: Matches request path against a pattern.
+  - `pattern` {String} The regex pattern to match against the request path.
+
+#### Rewriters
+
+There are several types of rewriters which may be used to rewrite the request
+before it is dispatched to PHP. Each rewriter type has a set of arguments which
+are passed to the constructor of the rewriter. The rewriter will be applied to
+the request if the conditions match.
+
+The available rewriter types are:
+
+- `header(name, replacement)` Sets a named header to a given replacement.
+  - `name` {String} The name of the header to set.
+  - `replacement` {String} The replacement string to use for named header.
+- `href(pattern, replacement)` Rewrites request path, query, and fragment to
+  given replacement.
+  - `pattern` {String} The regex pattern to match against the request path.
+  - `replacement` {String} The replacement string to use for request path.
+- `method(replacement)` Sets the request method to a given replacement.
+  - `replacement` {String} The replacement string to use for request method.
+- `path(pattern, replacement)` Rewrites request path to given replacement.
+  - `pattern` {String} The regex pattern to match against the request path.
+  - `replacement` {String} The replacement string to use for request path.
+
+### `rewriter.rewrite(request, docroot)`
+
+- `request` {Object} The request object.
+- `docroot` {String} The document root.
+
+Rewrites the given request using the rules provided to the rewriter.
+
+This is mainly exposed for testing purposes. It is not recommended to use
+directly. Rather, the `rewriter` should be provided to the `Php` constructor
+to allow rewriting to occur within the PHP environment where it will be aware
+of the original `REQUEST_URI` state.
+
+```js
+import { Rewriter } from '@platformatic/php-node'
+
+const rewriter = new Rewriter([{
+  rewriters: [{
+    type: 'path',
+    args: ['^(.*)$', '/base/$1'
+  }]
+}])
+
+const request = new Request({
+  url: 'http://example.com/foo/bar'
+})
+
+const modified = rewriter.rewrite(request, import.meta.dirname)
+
+console.log(modified.url) // http://example.com/base/foo/bar
+```
+
 ## Contributing
 
-This project is part of the [Platformatic](https://github.com/platformatic) ecosystem. Please refer to the main repository for contribution guidelines.
+This project is part of the [Platformatic](https://github.com/platformatic)
+ecosystem. Please refer to the main repository for contribution guidelines.
 
 ## License
 

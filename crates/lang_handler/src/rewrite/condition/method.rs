@@ -3,22 +3,22 @@ use std::{fmt::Debug, path::Path};
 use regex::{Error, Regex};
 
 use super::Condition;
-use super::Request;
+use crate::Request;
 
-/// Match request path to a regex pattern
+/// Matches a request method to a regex pattern
 #[derive(Clone, Debug)]
-pub struct PathCondition {
-  pattern: Regex,
-}
+pub struct MethodCondition(Regex);
 
-impl PathCondition {
-  /// Construct a new PathCondition matching the given Regex pattern.
+impl MethodCondition {
+  /// Construct a new MethodCondition matching the Request method to the given
+  /// Regex pattern.
   ///
   /// # Examples
   ///
   /// ```
-  /// # use lang_handler::rewrite::PathCondition;
-  /// let condition = PathCondition::new("^/index.php$")
+  /// # use lang_handler::rewrite::{Condition, MethodCondition};
+  /// # use lang_handler::Request;
+  /// let condition = MethodCondition::new("GET")
   ///   .expect("should be valid regex");
   /// ```
   pub fn new<R>(pattern: R) -> Result<Box<Self>, Error>
@@ -27,24 +27,25 @@ impl PathCondition {
     Error: From<<R as TryInto<Regex>>::Error>,
   {
     let pattern = pattern.try_into()?;
-    Ok(Box::new(Self { pattern }))
+    Ok(Box::new(Self(pattern)))
   }
 }
 
-impl Condition for PathCondition {
-  /// A PathCondition matches a request if the path segment of the request url
-  /// matches the pattern given when constructing the PathCondition.
+impl Condition for MethodCondition {
+  /// A MethodCondition matches a given request if the Request method matches
+  /// the given Regex pattern.
   ///
   /// # Examples
   ///
   /// ```
-  /// # use lang_handler::rewrite::{Condition, PathCondition};
+  /// # use lang_handler::rewrite::{Condition, MethodCondition};
   /// # use lang_handler::Request;
   /// # let docroot = std::env::temp_dir();
-  /// let condition = PathCondition::new("^/index.php$")
+  /// let condition = MethodCondition::new("GET")
   ///   .expect("should be valid regex");
   ///
   /// let request = Request::builder()
+  ///   .method("GET")
   ///   .url("http://example.com/index.php")
   ///   .build()
   ///   .expect("should build request");
@@ -52,13 +53,13 @@ impl Condition for PathCondition {
   /// assert!(condition.matches(&request, &docroot));
   /// # assert!(!condition.matches(
   /// #   &request.extend()
-  /// #     .url("http://example.com/other.php")
+  /// #     .method("POST")
   /// #     .build()
   /// #     .expect("should build request"),
   /// #   &docroot
   /// # ));
   /// ```
   fn matches(&self, request: &Request, _docroot: &Path) -> bool {
-    self.pattern.is_match(request.url().path())
+    self.0.is_match(request.method())
   }
 }

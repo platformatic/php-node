@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use std::{fmt::Debug, path::Path};
 
 use regex::{Error, Regex};
 
@@ -45,6 +45,7 @@ impl Condition for HeaderCondition {
   /// ```
   /// # use lang_handler::rewrite::{Condition, HeaderCondition};
   /// # use lang_handler::Request;
+  /// # let docroot = std::env::temp_dir();
   /// let condition = HeaderCondition::new("TEST", "^foo$")
   ///   .expect("should be valid regex");
   ///
@@ -54,9 +55,16 @@ impl Condition for HeaderCondition {
   ///   .build()
   ///   .expect("should build request");
   ///
-  /// assert!(condition.matches(&request));
+  /// assert!(condition.matches(&request, &docroot));
+  /// # assert!(!condition.matches(
+  /// #   &request.extend()
+  /// #     .header("TEST", "bar")
+  /// #     .build()
+  /// #     .expect("should build request"),
+  /// #   &docroot
+  /// # ));
   /// ```
-  fn matches(&self, request: &Request) -> bool {
+  fn matches(&self, request: &Request, _docroot: &Path) -> bool {
     request
       .headers()
       .get_line(&self.name)

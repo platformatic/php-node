@@ -1,8 +1,15 @@
+use lang_handler::RequestBuilderException;
+
 /// Set of exceptions which may be produced by php::Embed
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub enum EmbedStartError {
+  /// Document root not found, or not a directory
   DocRootNotFound(String),
+
+  /// Failed to identify the executable location
   ExeLocationNotFound,
+
+  /// Failed to initialize SAPI
   SapiNotInitialized,
 }
 
@@ -20,23 +27,54 @@ impl std::fmt::Display for EmbedStartError {
   }
 }
 
+/// Errors which may occur during the request lifecycle
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub enum EmbedRequestError {
+  /// SAPI not started
   SapiNotStarted,
+
+  /// SAPI not shutdown
   SapiNotShutdown,
+
+  /// SAPI request not started
   SapiRequestNotStarted,
+
+  /// Request context unavailable
   RequestContextUnavailable,
+
+  /// Failed to encode a string to a C-style string
   CStringEncodeFailed(String),
+
   // ExecuteError,
+  /// Exception thrown during script execution
   Exception(String),
+
+  /// PHP bailout, usually due to a fatal error or exit call
   Bailout,
+
+  /// Failed to build the response
   ResponseBuildError,
+
+  /// Failed to find the current directory
   FailedToFindCurrentDirectory,
+
+  /// Expected an absolute REQUEST_URI, but received a relative one
   ExpectedAbsoluteRequestUri(String),
+
+  /// Script not found in the document root
   ScriptNotFound(String),
+
+  /// Failed to determine the content type of the response
   FailedToDetermineContentType,
+
+  /// Failed to set a server variable
   FailedToSetServerVar(String),
+
+  /// Failed to set request info
   FailedToSetRequestInfo(String),
+
+  /// Error during request rewriting
+  RequestRewriteError(RequestBuilderException),
 }
 
 impl std::fmt::Display for EmbedRequestError {
@@ -68,6 +106,9 @@ impl std::fmt::Display for EmbedRequestError {
       }
       EmbedRequestError::FailedToSetRequestInfo(name) => {
         write!(f, "Failed to set request info: \"{}\"", name)
+      }
+      EmbedRequestError::RequestRewriteError(e) => {
+        write!(f, "Request rewrite error: {}", e)
       }
     }
   }
