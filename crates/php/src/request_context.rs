@@ -20,7 +20,7 @@ impl RequestContext {
   ///
   /// let request = Request::builder()
   ///   .method("GET")
-  ///   .url("http://example.com").expect("should parse url")
+  ///   .url("http://example.com")
   ///   .build()
   ///   .expect("should build request");
   ///
@@ -53,7 +53,7 @@ impl RequestContext {
   ///
   /// let request = Request::builder()
   ///   .method("GET")
-  ///   .url("http://example.com").expect("should parse url")
+  ///   .url("http://example.com")
   ///   .build()
   ///   .expect("should build request");
   ///
@@ -86,7 +86,7 @@ impl RequestContext {
   ///
   /// let request = Request::builder()
   ///   .method("GET")
-  ///   .url("http://example.com").expect("should parse url")
+  ///   .url("http://example.com")
   ///   .build()
   ///   .expect("should build request");
   ///
@@ -118,7 +118,7 @@ impl RequestContext {
   ///
   /// let request = Request::builder()
   ///   .method("GET")
-  ///   .url("http://example.com").expect("should parse url")
+  ///   .url("http://example.com")
   ///   .build()
   ///   .expect("should build request");
   ///
@@ -142,7 +142,7 @@ impl RequestContext {
   ///
   /// let request = Request::builder()
   ///   .method("GET")
-  ///   .url("http://example.com").expect("should parse url")
+  ///   .url("http://example.com")
   ///   .build()
   ///   .expect("should build request");
   ///
@@ -167,7 +167,7 @@ impl RequestContext {
   ///
   /// let request = Request::builder()
   ///   .method("GET")
-  ///   .url("http://example.com").expect("should parse url")
+  ///   .url("http://example.com")
   ///   .build()
   ///   .expect("should build request");
   ///

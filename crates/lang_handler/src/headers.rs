@@ -1,8 +1,12 @@
 use std::collections::{hash_map::Entry, HashMap};
 
+/// Represents a single HTTP header value or multiple values for the same header.
 #[derive(Debug, Clone)]
 pub enum Header {
+  /// A single value for a header.
   Single(String),
+
+  /// Multiple values for a header, stored as a vector.
   Multiple(Vec<String>),
 }
 
@@ -86,7 +90,7 @@ impl Headers {
     }
   }
 
-  /// Returns all values associated with a header field as a Vec<String>.
+  /// Returns all values associated with a header field as a `Vec<String>`.
   ///
   /// # Examples
   ///
