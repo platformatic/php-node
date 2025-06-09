@@ -186,6 +186,13 @@ impl Handler for Embed {
   fn handle(&self, request: Request) -> Result<Response, Self::Error> {
     let docroot = self.docroot.clone();
 
+    // Initialize the SAPI module
+    self.sapi.startup()?;
+
+    // Get REQUEST_URI _first_ as it needs the pre-rewrite state.
+    let url = request.url();
+    let request_uri = url.path();
+
     // Apply request rewriting rules
     let mut request = request.clone();
     if let Some(rewriter) = &self.rewriter {
@@ -194,19 +201,15 @@ impl Handler for Embed {
         .map_err(EmbedRequestError::RequestRewriteError)?;
     }
 
-    // Initialize the SAPI module
-    self.sapi.startup()?;
+    let translated_path = translate_path(&docroot, request.url().path())?
+      .display()
+      .to_string();
 
-    let url = request.url();
-
-    // Get original request URI and translate to final path
-    // TODO: Should do this with request rewriting later...
-    let request_uri = url.path();
-    let translated_path = translate_path(&docroot, request_uri)?.display().to_string();
-    let path_translated = cstr(translated_path.clone())
-      .map_err(|_| EmbedRequestError::FailedToSetRequestInfo("path_translated".into()))?;
+    // Convert REQUEST_URI and PATH_TRANSLATED to C strings
     let request_uri = cstr(request_uri)
       .map_err(|_| EmbedRequestError::FailedToSetRequestInfo("request_uri".into()))?;
+    let path_translated = cstr(translated_path.clone())
+      .map_err(|_| EmbedRequestError::FailedToSetRequestInfo("path_translated".into()))?;
 
     // Extract request method, query string, and headers
     let request_method = cstr(request.method())
