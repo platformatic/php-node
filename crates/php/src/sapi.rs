@@ -298,6 +298,7 @@ pub extern "C" fn sapi_module_send_header(header: *mut SapiHeader, _server_conte
   // Header value is None for http version + status line
   if let Some(value) = header.value() {
     if let Some(ctx) = RequestContext::current() {
+      println!("Sending header: {} = {}", name, value);
       ctx.response_builder().header(name, value);
     }
   }
@@ -414,8 +415,14 @@ pub extern "C" fn sapi_module_register_server_variables(vars: *mut ext_php_rs::t
         env_var(vars, "SERVER_ADMIN", "webmaster@localhost")?;
         env_var(vars, "GATEWAY_INTERFACE", "CGI/1.1")?;
 
-        env_var_c(vars, "PHP_SELF", script_name as *mut c_char)?;
-        env_var_c(vars, "SCRIPT_NAME", script_name as *mut c_char)?;
+        // Laravel seems to think "/register" should be "/index.php/register"?
+        // env_var_c(vars, "PHP_SELF", script_name as *mut c_char)?;
+        env_var(vars, "PHP_SELF", request.url().path())?;
+
+        // TODO: is "/register", should be "/index.php"
+        env_var(vars, "SCRIPT_NAME", request.url().path())?;
+        // env_var_c(vars, "SCRIPT_NAME", script_name as *mut c_char)?;
+        env_var_c(vars, "PATH_INFO", script_name as *mut c_char)?;
         env_var_c(vars, "SCRIPT_FILENAME", script_filename)?;
         env_var_c(vars, "PATH_TRANSLATED", script_filename)?;
         env_var_c(vars, "DOCUMENT_ROOT", docroot_cstr)?;

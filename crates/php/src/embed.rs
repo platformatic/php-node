@@ -297,17 +297,22 @@ impl Handler for Embed {
         })
         .unwrap_or(Err(EmbedRequestError::Bailout))?;
 
-        let (mimetype, http_response_code) = {
+        let (mimetype, http_response_code, send_default_content_type) = {
           let globals = SapiGlobals::get();
           (
             globals.sapi_headers.mimetype,
             globals.sapi_headers.http_response_code,
+            globals.sapi_headers.send_default_content_type
           )
         };
 
-        let mime_ptr = unsafe { (mimetype as *mut std::ffi::c_char).as_ref() }
-          .or(unsafe { sapi_get_default_content_type().as_ref() })
-          .ok_or(EmbedRequestError::FailedToDetermineContentType)?;
+        let mime_ptr = unsafe {
+          if send_default_content_type == 1 {
+            sapi_get_default_content_type().as_ref()
+          } else {
+            (mimetype as *mut std::ffi::c_char).as_ref()
+          }
+        }.ok_or(EmbedRequestError::FailedToDetermineContentType)?;
 
         let mime = unsafe { std::ffi::CStr::from_ptr(mime_ptr) }
           .to_str()

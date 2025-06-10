@@ -1,16 +1,16 @@
 use std::{
-  ffi::c_void,
+  ffi::{c_void, c_char},
   ops::{Deref, DerefMut},
   path::Path,
 };
 
 use ext_php_rs::{
-  alloc::estrdup,
+  alloc::{estrdup, efree},
   ffi::{
     _zend_file_handle__bindgen_ty_1, php_request_shutdown, php_request_startup,
     zend_destroy_file_handle, zend_file_handle, zend_stream_init_filename,
     ZEND_RESULT_CODE_SUCCESS,
-  },
+  }
 };
 
 use super::EmbedRequestError;
@@ -39,7 +39,7 @@ impl Drop for RequestScope {
   }
 }
 
-pub(crate) struct FileHandleScope(zend_file_handle);
+pub(crate) struct FileHandleScope(zend_file_handle, *mut c_char);
 
 impl FileHandleScope {
   pub fn new<P>(path: P) -> Self
@@ -59,14 +59,14 @@ impl FileHandleScope {
       len: 0,
     };
 
-    let path = unsafe { estrdup(path.as_ref().to_str().unwrap()) };
+    let path = estrdup(path.as_ref().to_str().unwrap());
 
     unsafe {
       zend_stream_init_filename(&mut handle, path);
     }
     handle.primary_script = true;
 
-    Self(handle)
+    Self(handle, path)
   }
 }
 
@@ -85,6 +85,9 @@ impl DerefMut for FileHandleScope {
 
 impl Drop for FileHandleScope {
   fn drop(&mut self) {
-    unsafe { zend_destroy_file_handle(&mut self.0) };
+    unsafe {
+      zend_destroy_file_handle(&mut self.0);
+      efree(self.1 as *mut u8);
+    };
   }
 }
