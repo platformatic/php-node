@@ -1,4 +1,4 @@
-use crate::{Request, Response};
+use super::{Request, Response};
 
 /// Enables a type to support handling HTTP requests.
 ///
@@ -23,6 +23,7 @@ use crate::{Request, Response};
 ///   }
 /// }
 pub trait Handler {
+  /// The type of error that can occur while handling a request.
   type Error;
 
   /// Handles an HTTP request.
@@ -50,7 +51,7 @@ pub trait Handler {
   /// #
   /// let request = Request::builder()
   ///   .method("GET")
-  ///   .url("http://example.com").expect("invalid url")
+  ///   .url("http://example.com")
   ///   .build()
   ///   .expect("should build request");
   ///

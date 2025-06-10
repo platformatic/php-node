@@ -2,14 +2,16 @@ const {
   Php,
   Headers,
   Request,
-  Response
+  Response,
+  Rewriter
 } = getNativeBinding(process)
 
 module.exports = {
   Php,
   Headers,
   Request,
-  Response
+  Response,
+  Rewriter
 }
 
 function isMusl() {
