@@ -8,9 +8,10 @@ use std::{
 use bytes::Buf;
 
 use ext_php_rs::{
+  alloc::{efree, estrdup},
   builders::SapiBuilder,
   embed::SapiModule,
-  exception::register_error_observer,
+  // exception::register_error_observer,
   ffi::{
     ext_php_rs_sapi_per_thread_init, ext_php_rs_sapi_shutdown, ext_php_rs_sapi_startup,
     php_module_shutdown, php_module_startup, php_register_variable, sapi_send_headers,
@@ -22,10 +23,7 @@ use ext_php_rs::{
 
 use once_cell::sync::OnceCell;
 
-use crate::{
-  strings::{cstr, drop_str, reclaim_str},
-  EmbedRequestError, EmbedStartError, RequestContext,
-};
+use crate::{EmbedRequestError, EmbedStartError, RequestContext};
 use lang_handler::Header;
 
 // This is a helper to ensure that PHP is initialized and deinitialized at the
@@ -76,17 +74,17 @@ impl Sapi {
     // writing to the ResponseBuilder here. When php_execute_script fails it
     // should read that and could return an error or write it to the
     // ResponseBuilder there.
-    register_error_observer(|_error_type, _file, _line, message| {
-      message
-        .as_str()
-        .inspect(|msg| {
-          if let Some(ctx) = RequestContext::current() {
-            ctx.response_builder().exception(*msg);
-          }
-        })
-        // TODO: Report this error somehow?
-        .ok();
-    });
+    // TODO: Having error observers registered crashes Laravel.
+    // register_error_observer(|error_type, file, line, message| {
+    //   let file = file.as_str().expect("should convert zend_string to str");
+    //   // TODO: Report this error somehow?
+    //   if let Ok(msg) = message.as_str() {
+    //     println!("PHP Error #{}: {}\n\tfrom {}:{}", error_type, msg, file, line);
+    //     if let Some(ctx) = RequestContext::current() {
+    //       ctx.response_builder().exception(msg);
+    //     }
+    //   }
+    // });
 
     Ok(Sapi(RwLock::new(boxed)))
   }
@@ -129,12 +127,6 @@ impl Sapi {
 impl Drop for Sapi {
   fn drop(&mut self) {
     self.shutdown().unwrap();
-
-    {
-      let sapi = self.0.write().expect("should get writable sapi");
-
-      reclaim_str(sapi.executable_location);
-    }
 
     unsafe {
       sapi_shutdown();
@@ -239,23 +231,32 @@ pub extern "C" fn sapi_module_deactivate() -> c_int {
   let mut globals = SapiGlobals::get_mut();
 
   for i in 0..globals.request_info.argc {
-    drop_str(unsafe { *globals.request_info.argv.offset(i as isize) });
+    maybe_efree(unsafe { *globals.request_info.argv.offset(i as isize) }.cast::<u8>());
   }
 
   globals.request_info.argc = 0;
   globals.request_info.argv = std::ptr::null_mut();
 
-  drop_str(globals.request_info.request_method as *mut c_char);
-  drop_str(globals.request_info.query_string as *mut c_char);
-  drop_str(globals.request_info.request_uri as *mut c_char);
-  drop_str(globals.request_info.path_translated as *mut c_char);
-  drop_str(globals.request_info.content_type as *mut c_char);
-  drop_str(globals.request_info.cookie_data as *mut c_char);
-  drop_str(globals.request_info.auth_user as *mut c_char);
-  drop_str(globals.request_info.auth_password as *mut c_char);
-  drop_str(globals.request_info.auth_digest as *mut c_char);
+  maybe_efree(globals.request_info.request_method as *mut u8);
+  maybe_efree(globals.request_info.content_type as *mut u8);
+  maybe_efree(globals.request_info.query_string.cast::<u8>());
+  maybe_efree(globals.request_info.request_uri.cast::<u8>());
+  maybe_efree(globals.request_info.path_translated.cast::<u8>());
+  maybe_efree(globals.request_info.auth_user.cast::<u8>());
+  maybe_efree(globals.request_info.auth_password.cast::<u8>());
+  maybe_efree(globals.request_info.auth_digest.cast::<u8>());
+
+  maybe_efree(globals.request_info.cookie_data.cast::<u8>());
 
   ZEND_RESULT_CODE_SUCCESS
+}
+
+fn maybe_efree(ptr: *mut u8) {
+  if !ptr.is_null() {
+    unsafe {
+      efree(ptr);
+    }
+  }
 }
 
 #[no_mangle]
@@ -275,14 +276,7 @@ pub extern "C" fn sapi_module_ub_write(str: *const c_char, str_length: usize) ->
 
 #[no_mangle]
 pub extern "C" fn sapi_module_flush(_server_context: *mut c_void) {
-  if let Some(ctx) = RequestContext::current() {
-    unsafe { sapi_send_headers() };
-    let mut globals = SapiGlobals::get_mut();
-    globals.headers_sent = 1;
-    ctx
-      .response_builder()
-      .status(globals.sapi_headers.http_response_code);
-  }
+  unsafe { sapi_send_headers() };
 }
 
 #[no_mangle]
@@ -329,7 +323,12 @@ pub extern "C" fn sapi_module_read_post(buffer: *mut c_char, length: usize) -> u
 
 #[no_mangle]
 pub extern "C" fn sapi_module_read_cookies() -> *mut c_char {
-  SapiGlobals::get().request_info.cookie_data
+  RequestContext::current()
+    .map(|ctx| match ctx.request().headers().get("Cookie") {
+      Some(cookie) => estrdup(cookie),
+      None => std::ptr::null_mut(),
+    })
+    .unwrap_or(std::ptr::null_mut())
 }
 
 fn env_var<K, V>(
@@ -341,10 +340,9 @@ where
   K: AsRef<str>,
   V: AsRef<str>,
 {
-  let c_value = cstr(value.as_ref())
-    .map_err(|_| EmbedRequestError::FailedToSetServerVar(key.as_ref().to_owned()))?;
+  let c_value = estrdup(value.as_ref());
   env_var_c(vars, key, c_value)?;
-  reclaim_str(c_value);
+  maybe_efree(c_value.cast::<u8>());
 
   Ok(())
 }
@@ -357,12 +355,11 @@ fn env_var_c<K>(
 where
   K: AsRef<str>,
 {
-  let c_key = cstr(key.as_ref())
-    .map_err(|_| EmbedRequestError::FailedToSetServerVar(key.as_ref().to_owned()))?;
+  let c_key = estrdup(key.as_ref());
   unsafe {
     php_register_variable(c_key, c_value, vars);
   }
-  reclaim_str(c_key);
+  maybe_efree(c_key.cast::<u8>());
 
   Ok(())
 }
@@ -400,7 +397,7 @@ pub extern "C" fn sapi_module_register_server_variables(vars: *mut ext_php_rs::t
         let req_info = &globals.request_info;
 
         let docroot = ctx.docroot();
-        let docroot_cstr = cstr(docroot.display().to_string())?;
+        let docroot_str = docroot.display().to_string();
 
         let script_filename = req_info.path_translated;
         let script_name = if !req_info.request_uri.is_null() {
@@ -414,12 +411,18 @@ pub extern "C" fn sapi_module_register_server_variables(vars: *mut ext_php_rs::t
         env_var(vars, "SERVER_ADMIN", "webmaster@localhost")?;
         env_var(vars, "GATEWAY_INTERFACE", "CGI/1.1")?;
 
-        env_var_c(vars, "PHP_SELF", script_name as *mut c_char)?;
-        env_var_c(vars, "SCRIPT_NAME", script_name as *mut c_char)?;
+        // Laravel seems to think "/register" should be "/index.php/register"?
+        // env_var_c(vars, "PHP_SELF", script_name as *mut c_char)?;
+        env_var(vars, "PHP_SELF", request.url().path())?;
+
+        // TODO: is "/register", should be "/index.php"
+        env_var(vars, "SCRIPT_NAME", request.url().path())?;
+        // env_var_c(vars, "SCRIPT_NAME", script_name as *mut c_char)?;
+        env_var_c(vars, "PATH_INFO", script_name as *mut c_char)?;
         env_var_c(vars, "SCRIPT_FILENAME", script_filename)?;
         env_var_c(vars, "PATH_TRANSLATED", script_filename)?;
-        env_var_c(vars, "DOCUMENT_ROOT", docroot_cstr)?;
-        env_var_c(vars, "CONTEXT_DOCUMENT_ROOT", docroot_cstr)?;
+        env_var(vars, "DOCUMENT_ROOT", docroot_str.clone())?;
+        env_var(vars, "CONTEXT_DOCUMENT_ROOT", docroot_str)?;
 
         if let Ok(server_name) = hostname::get() {
           if let Some(server_name) = server_name.to_str() {

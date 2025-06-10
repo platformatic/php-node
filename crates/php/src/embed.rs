@@ -1,12 +1,12 @@
 use std::{
   env::Args,
-  ffi::CString,
   ops::DerefMut,
   path::{Path, PathBuf},
   sync::Arc,
 };
 
 use ext_php_rs::{
+  alloc::{efree, estrdup},
   error::Error,
   ffi::{php_execute_script, sapi_get_default_content_type},
   zend::{try_catch, try_catch_first, ExecutorGlobals, SapiGlobals},
@@ -17,7 +17,7 @@ use lang_handler::{rewrite::Rewriter, Handler, Request, Response};
 use super::{
   sapi::{ensure_sapi, Sapi},
   scopes::{FileHandleScope, RequestScope},
-  strings::{cstr, nullable_cstr, translate_path},
+  strings::translate_path,
   EmbedRequestError, EmbedStartError, RequestContext,
 };
 
@@ -206,34 +206,28 @@ impl Handler for Embed {
       .to_string();
 
     // Convert REQUEST_URI and PATH_TRANSLATED to C strings
-    let request_uri = cstr(request_uri)
-      .map_err(|_| EmbedRequestError::FailedToSetRequestInfo("request_uri".into()))?;
-    let path_translated = cstr(translated_path.clone())
-      .map_err(|_| EmbedRequestError::FailedToSetRequestInfo("path_translated".into()))?;
+    let request_uri = estrdup(request_uri);
+    let path_translated = estrdup(translated_path.clone());
 
     // Extract request method, query string, and headers
-    let request_method = cstr(request.method())
-      .map_err(|_| EmbedRequestError::FailedToSetRequestInfo("request_method".into()))?;
-    let query_string = cstr(url.query().unwrap_or(""))
-      .map_err(|_| EmbedRequestError::FailedToSetRequestInfo("query_string".into()))?;
+    let request_method = estrdup(request.method());
+    let query_string = estrdup(url.query().unwrap_or(""));
 
     let headers = request.headers();
-    let content_type = nullable_cstr(headers.get("Content-Type"))
-      .map_err(|_| EmbedRequestError::FailedToSetRequestInfo("content_type".into()))?;
+    let content_type = headers
+      .get("Content-Type")
+      .map(estrdup)
+      .unwrap_or(std::ptr::null_mut());
     let content_length = headers
       .get("Content-Length")
       .map(|v| v.parse::<i64>().unwrap_or(0))
       .unwrap_or(0);
-    let cookie_data = nullable_cstr(headers.get("Cookie"))
-      .map_err(|_| EmbedRequestError::FailedToSetRequestInfo("cookie_data".into()))?;
 
     // Prepare argv and argc
     let argc = self.args.len() as i32;
     let mut argv_ptrs = vec![];
     for arg in self.args.iter() {
-      let string = CString::new(arg.as_bytes())
-        .map_err(|_| EmbedRequestError::FailedToSetRequestInfo("argv".into()))?;
-      argv_ptrs.push(string.into_raw());
+      argv_ptrs.push(estrdup(arg.to_owned()));
     }
 
     let script_name = translated_path.clone();
@@ -263,55 +257,53 @@ impl Handler for Embed {
 
         globals.request_info.content_type = content_type;
         globals.request_info.content_length = content_length;
-        globals.request_info.cookie_data = cookie_data;
       }
 
       let response_builder = {
         let _request_scope = RequestScope::new()?;
 
         // Run script in its own try/catch so bailout doesn't skip request shutdown.
-        try_catch(|| {
+        {
           let mut file_handle = FileHandleScope::new(script_name.clone());
-          if !unsafe { php_execute_script(file_handle.deref_mut()) } {
-            // return Err(EmbedException::ExecuteError);
+          try_catch(|| unsafe { php_execute_script(file_handle.deref_mut()) })
+            .map_err(|_| EmbedRequestError::Bailout)?;
+        }
+
+        if let Some(err) = ExecutorGlobals::take_exception() {
+          {
+            let mut globals = SapiGlobals::get_mut();
+            globals.sapi_headers.http_response_code = 500;
           }
 
-          if let Some(err) = ExecutorGlobals::take_exception() {
-            {
-              let mut globals = SapiGlobals::get_mut();
-              globals.sapi_headers.http_response_code = 500;
-            }
+          let ex = Error::Exception(err);
 
-            let ex = Error::Exception(err);
-
-            if let Some(ctx) = RequestContext::current() {
-              ctx.response_builder().exception(ex.to_string());
-            }
-
-            // TODO: Should exceptions be raised or only captured on
-            // the response builder?
-            return Err(EmbedRequestError::Exception(ex.to_string()));
+          if let Some(ctx) = RequestContext::current() {
+            ctx.response_builder().exception(ex.to_string());
           }
 
-          Ok(())
-        })
-        .unwrap_or(Err(EmbedRequestError::Bailout))?;
-
-        let (mimetype, http_response_code) = {
-          let globals = SapiGlobals::get();
-          (
-            globals.sapi_headers.mimetype,
-            globals.sapi_headers.http_response_code,
-          )
+          return Err(EmbedRequestError::Exception(ex.to_string()));
         };
 
-        let mime_ptr = unsafe { (mimetype as *mut std::ffi::c_char).as_ref() }
-          .or(unsafe { sapi_get_default_content_type().as_ref() })
-          .ok_or(EmbedRequestError::FailedToDetermineContentType)?;
+        let (mut mimetype, http_response_code) = {
+          let h = SapiGlobals::get().sapi_headers;
+          (h.mimetype, h.http_response_code)
+        };
+
+        if mimetype.is_null() {
+          mimetype = unsafe { sapi_get_default_content_type() };
+        }
+
+        let mime_ptr =
+          unsafe { mimetype.as_ref() }.ok_or(EmbedRequestError::FailedToDetermineContentType)?;
 
         let mime = unsafe { std::ffi::CStr::from_ptr(mime_ptr) }
           .to_str()
-          .map_err(|_| EmbedRequestError::FailedToDetermineContentType)?;
+          .map_err(|_| EmbedRequestError::FailedToDetermineContentType)?
+          .to_owned();
+
+        unsafe {
+          efree(mimetype.cast::<u8>());
+        }
 
         RequestContext::current()
           .map(|ctx| {

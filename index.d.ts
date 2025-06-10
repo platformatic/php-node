@@ -8,10 +8,14 @@ export interface PhpRequestSocketOptions {
   localAddress: string
   /** The numeric representation of the local port. For example, 80 or 21. */
   localPort: number
+  /** The string representation of the local IP family, e.g., "IPv4" or "IPv6". */
+  localFamily: string
   /** The string representation of the remote IP address. */
   remoteAddress: string
   /** The numeric representation of the remote port. For example, 80 or 21. */
   remotePort: number
+  /** The string representation of the remote IP family, e.g., "IPv4" or "IPv6". */
+  remoteFamily: string
 }
 /** Options for creating a new PHP request. */
 export interface PhpRequestOptions {
