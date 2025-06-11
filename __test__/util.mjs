@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { writeFile, mkdir, rmdir } from 'node:fs/promises'
+import { writeFile, mkdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -54,7 +54,7 @@ export class MockRoot {
    * Cleanup the mock docroot
    */
   async clean() {
-    await rmdir(this.path, {
+    await rm(this.path, {
       recursive: true,
       force: true
     })
