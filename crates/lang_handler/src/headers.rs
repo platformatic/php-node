@@ -1,7 +1,7 @@
 use std::collections::{hash_map::Entry, HashMap};
 
 /// Represents a single HTTP header value or multiple values for the same header.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum Header {
   /// A single value for a header.
   Single(String),
@@ -62,9 +62,7 @@ impl Headers {
   where
     K: AsRef<str>,
   {
-    self
-      .0
-      .contains_key(key.as_ref() /*.to_lowercase().as_str()*/)
+    self.0.contains_key(key.as_ref().to_lowercase().as_str())
   }
 
   /// Returns the last single value associated with a header field.
@@ -83,7 +81,7 @@ impl Headers {
   where
     K: AsRef<str>,
   {
-    match self.0.get(key.as_ref() /*.to_lowercase().as_str()*/) {
+    match self.0.get(key.as_ref().to_lowercase().as_str()) {
       Some(Header::Single(value)) => Some(value.clone()),
       Some(Header::Multiple(values)) => values.last().cloned(),
       None => None,
@@ -112,7 +110,7 @@ impl Headers {
   where
     K: AsRef<str>,
   {
-    match self.0.get(key.as_ref() /*.to_lowercase().as_str()*/) {
+    match self.0.get(key.as_ref().to_lowercase().as_str()) {
       Some(Header::Single(value)) => vec![value.clone()],
       Some(Header::Multiple(values)) => values.clone(),
       None => Vec::new(),
@@ -143,12 +141,10 @@ impl Headers {
   where
     K: AsRef<str>,
   {
-    let result = self.get_all(key).join(",");
-    if result.is_empty() {
-      None
-    } else {
-      Some(result)
-    }
+    self
+      .0
+      .get(key.as_ref().to_lowercase().as_str())
+      .map(|v| v.into())
   }
 
   /// Sets a header field, replacing any existing values.
@@ -168,10 +164,9 @@ impl Headers {
     K: Into<String>,
     V: Into<String>,
   {
-    self.0.insert(
-      key.into(), /*.to_lowercase()*/
-      Header::Single(value.into()),
-    );
+    self
+      .0
+      .insert(key.into().to_lowercase(), Header::Single(value.into()));
   }
 
   /// Add a header with the given value without replacing existing ones.
@@ -194,7 +189,7 @@ impl Headers {
     K: Into<String>,
     V: Into<String>,
   {
-    let key = key.into()/*.to_lowercase()*/;
+    let key = key.into().to_lowercase();
     let value = value.into();
 
     match self.0.entry(key) {
@@ -234,7 +229,7 @@ impl Headers {
   where
     K: AsRef<str>,
   {
-    self.0.remove(key.as_ref() /*.to_lowercase().as_str()*/);
+    self.0.remove(key.as_ref().to_lowercase().as_str());
   }
 
   /// Clears all headers.
@@ -292,14 +287,21 @@ impl Headers {
   /// # Examples
   ///
   /// ```
-  /// # use lang_handler::Headers;
+  /// # use lang_handler::{Headers, Header};
   /// let mut headers = Headers::new();
-  /// headers.set("Accept", "text/plain");
-  /// headers.set("Accept", "application/json");
+  /// headers.add("Accept", "text/plain");
+  /// headers.add("Accept", "application/json");
   ///
   /// for (key, values) in headers.iter() {
   ///    println!("{}: {:?}", key, values);
   /// }
+  ///
+  /// # assert_eq!(headers.iter().collect::<Vec<(&String, &Header)>>(), vec![
+  /// #   (&"accept".to_string(), &Header::Multiple(vec![
+  /// #     "text/plain".to_string(),
+  /// #     "application/json".to_string()
+  /// #   ]))
+  /// # ]);
   /// ```
   pub fn iter(&self) -> impl Iterator<Item = (&String, &Header)> {
     self.0.iter()
