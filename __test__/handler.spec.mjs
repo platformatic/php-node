@@ -70,7 +70,7 @@ test('Capture exceptions', async (t) => {
   const res = await php.handleRequest(req)
 
   // TODO: should exceptions be thrown rather than message-captured?
-  t.assert(/Hello, from PHP!/.test(res.exception))
+  t.assert(/Uncaught Exception: Hello, from PHP!/.test(res.log))
 })
 
 test('Support request and response headers', async (t) => {

@@ -14,10 +14,14 @@ pub struct PhpRequestSocketOptions {
   pub local_address: String,
   /// The numeric representation of the local port. For example, 80 or 21.
   pub local_port: u16,
+  /// The string representation of the local IP family, e.g., "IPv4" or "IPv6".
+  pub local_family: String,
   /// The string representation of the remote IP address.
   pub remote_address: String,
   /// The numeric representation of the remote port. For example, 80 or 21.
   pub remote_port: u16,
+  /// The string representation of the remote IP family, e.g., "IPv4" or "IPv6".
+  pub remote_family: String,
 }
 
 /// Options for creating a new PHP request.
@@ -84,9 +88,25 @@ impl PhpRequest {
       builder = builder.method(method)
     }
 
+    fn sock_addr(family: &str, address: &str, port: u16) -> String {
+      if family == "IPv6" {
+        format!("[{}]:{}", address, port)
+      } else {
+        format!("{}:{}", address, port)
+      }
+    }
+
     if let Some(socket) = options.socket {
-      let local_socket = format!("{}:{}", socket.local_address, socket.local_port);
-      let remote_socket = format!("{}:{}", socket.remote_address, socket.remote_port);
+      let local_socket = sock_addr(
+        &socket.local_family,
+        &socket.local_address,
+        socket.local_port,
+      );
+      let remote_socket = sock_addr(
+        &socket.local_family,
+        &socket.remote_address,
+        socket.remote_port,
+      );
 
       builder = builder
         .local_socket(&local_socket)
