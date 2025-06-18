@@ -24,7 +24,6 @@ use ext_php_rs::{
 use once_cell::sync::OnceCell;
 
 use crate::{EmbedRequestError, EmbedStartError, RequestContext};
-use lang_handler::Header;
 
 // This is a helper to ensure that PHP is initialized and deinitialized at the
 // appropriate times.
@@ -381,16 +380,10 @@ pub extern "C" fn sapi_module_register_server_variables(vars: *mut ext_php_rs::t
     Ok::<(), EmbedRequestError>(())
       .and_then(|_| {
         for (key, values) in headers.iter() {
-          let maybe_header = match values {
-            Header::Single(header) => Some(header),
-            Header::Multiple(headers) => headers.first(),
-          };
-
-          if let Some(header) = maybe_header {
-            let upper = key.to_ascii_uppercase();
-            let cgi_key = format!("HTTP_{}", upper.replace("-", "_"));
-            env_var(vars, cgi_key, header)?;
-          }
+          let value_string: String = values.into();
+          let upper = key.to_ascii_uppercase();
+          let cgi_key = format!("HTTP_{}", upper.replace("-", "_"));
+          env_var(vars, cgi_key, value_string)?;
         }
 
         let globals = SapiGlobals::get();

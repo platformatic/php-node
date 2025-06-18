@@ -78,8 +78,9 @@ test('Support request and response headers', async (t) => {
     'index.php': `<?php
       $headers = apache_request_headers();
       header("X-Test: Hello, from PHP!");
-      // TODO: Does PHP expect headers be returned to uppercase?
-      echo $headers["X-Test"];
+      // apache_request_headers is specified to contain whichever casing was
+      // received from the client, so just use lang_handler's lowercase value.
+      echo $headers["x-test"];
     ?>`
   })
   t.teardown(() => mockroot.clean())
