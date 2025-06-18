@@ -24,8 +24,9 @@ test('Full Response construction', (t) => {
   const res = new Response({
     status: 200,
     headers: {
-      'Content-Type': ['application/json'],
-      'X-Custom-Header': ['CustomValue']
+      'Content-Type': 'application/json',
+      'Accept': ['application/json', 'text/plain'],
+      'X-Custom-Header': 'CustomValue'
     },
     body: Buffer.from(json),
     log: Buffer.from('Hello, from error_log!'),
@@ -35,6 +36,7 @@ test('Full Response construction', (t) => {
   t.is(res.status, 200)
   t.assert(res.headers instanceof Headers)
   t.deepEqual(res.headers.get('Content-Type'), 'application/json')
+  t.deepEqual(res.headers.getAll('Accept'), ['application/json', 'text/plain'])
   t.assert(res.body instanceof Buffer)
   t.deepEqual(res.body.toString(), json)
   t.assert(res.log instanceof Buffer)

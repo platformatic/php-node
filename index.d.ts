@@ -23,12 +23,8 @@ export interface PhpRequestOptions {
   method?: string
   /** The URL for the request. */
   url: string
-  /**
-   * The headers for the request.
-   * TODO: Figure out how to accept a Headers instance
-   * TODO: Figure out how to support both single values without array wrap
-   */
-  headers?: Record<string, Array<string>>
+  /** The headers for the request. */
+  headers?: Headers
   /** The body for the request. */
   body?: Uint8Array
   /** The socket information for the request. */
@@ -38,12 +34,8 @@ export interface PhpRequestOptions {
 export interface PhpResponseOptions {
   /** The HTTP status code for the response. */
   status?: number
-  /**
-   * The headers for the response.
-   * TODO: Figure out how to accept a Headers instance
-   * TODO: Figure out how to support both single values without array wrap
-   */
-  headers?: Record<string, Array<string>>
+  /** The headers for the response. */
+  headers?: Headers
   /** The body for the response. */
   body?: Uint8Array
   /** The log for the response. */
@@ -97,7 +89,7 @@ export declare class Headers {
    * const headers = new Headers();
    * ```
    */
-  constructor()
+  constructor(headers?: Headers | undefined | null)
   /**
    * Get the last set value for a given header key.
    *

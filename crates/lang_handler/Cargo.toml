@@ -10,12 +10,13 @@ path = "src/lib.rs"
 
 [features]
 default = []
-c = []
+napi = ["dep:napi", "dep:napi-build"]
 
 [build-dependencies]
-cbindgen = "0.28.0"
+napi-build = { version = "2.0.1", optional = true }
 
 [dependencies]
 bytes = "1.10.1"
+napi = { version = "2.16.17", optional = true }
 regex = "1.11.1"
 url = "2.5.4"

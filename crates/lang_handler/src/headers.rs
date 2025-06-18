@@ -19,6 +19,66 @@ impl From<&Header> for String {
   }
 }
 
+// TODO: Figure out why From<Into<String>> conflicts with From<Vec<String>>
+impl From<String> for Header {
+  fn from(value: String) -> Header {
+    Header::Single(value)
+  }
+}
+
+impl From<&str> for Header {
+  fn from(value: &str) -> Header {
+    Header::Single(value.to_string())
+  }
+}
+
+impl From<Vec<String>> for Header {
+  fn from(values: Vec<String>) -> Header {
+    Header::Multiple(values)
+  }
+}
+
+#[cfg(feature = "napi")]
+mod napi_header {
+  use super::*;
+
+  use napi::bindgen_prelude::*;
+  use napi::sys;
+
+  impl FromNapiValue for Header {
+    unsafe fn from_napi_value(env: sys::napi_env, value: sys::napi_value) -> Result<Self> {
+      let mut header_type = sys::ValueType::napi_undefined;
+      unsafe { check_status!(sys::napi_typeof(env, value, &mut header_type)) }?;
+
+      let header_type: ValueType = header_type.into();
+
+      match header_type {
+        ValueType::String => {
+          let s = String::from_napi_value(env, value)?;
+          Ok(Header::Single(s))
+        }
+        ValueType::Object => {
+          let obj = Vec::<String>::from_napi_value(env, value)?;
+          Ok(Header::Multiple(obj))
+        }
+        _ => Err(napi::Error::new(
+          Status::InvalidArg,
+          "Expected a string or an object for Header",
+        )),
+      }
+    }
+  }
+
+  impl ToNapiValue for Header {
+    unsafe fn to_napi_value(env: sys::napi_env, value: Self) -> Result<sys::napi_value> {
+      match value {
+        Header::Single(value) => String::to_napi_value(env, value),
+        Header::Multiple(values) => Vec::<String>::to_napi_value(env, values),
+      }
+    }
+  }
+}
+
 /// A multi-map of HTTP headers.
 ///
 /// # Examples
@@ -162,11 +222,9 @@ impl Headers {
   pub fn set<K, V>(&mut self, key: K, value: V)
   where
     K: Into<String>,
-    V: Into<String>,
+    V: Into<Header>,
   {
-    self
-      .0
-      .insert(key.into().to_lowercase(), Header::Single(value.into()));
+    self.0.insert(key.into().to_lowercase(), value.into());
   }
 
   /// Add a header with the given value without replacing existing ones.
@@ -311,5 +369,89 @@ impl Headers {
 impl Default for Headers {
   fn default() -> Self {
     Self::new()
+  }
+}
+
+#[cfg(feature = "napi")]
+mod napi_headers {
+  use super::*;
+
+  use std::ptr;
+
+  use napi::bindgen_prelude::*;
+  use napi::sys;
+
+  impl FromNapiValue for Headers {
+    unsafe fn from_napi_value(env: sys::napi_env, value: sys::napi_value) -> Result<Self> {
+      let mut header_type = sys::ValueType::napi_undefined;
+      unsafe { check_status!(sys::napi_typeof(env, value, &mut header_type)) }?;
+
+      let header_type: ValueType = header_type.into();
+
+      if header_type != ValueType::Object {
+        return Err(napi::Error::new(
+          napi::Status::InvalidArg,
+          "Expected an object for Headers",
+        ));
+      }
+
+      let mut headers = Headers::new();
+      unsafe {
+        let mut keys: sys::napi_value = ptr::null_mut();
+        check_status!(
+          sys::napi_get_property_names(env, value, &mut keys),
+          "Failed to get Headers property names"
+        )?;
+
+        let mut key_count = 0;
+        check_status!(sys::napi_get_array_length(env, keys, &mut key_count))?;
+
+        for i in 0..key_count {
+          let mut key: sys::napi_value = ptr::null_mut();
+          check_status!(
+            sys::napi_get_element(env, keys, i, &mut key),
+            "Failed to get header name"
+          )?;
+          let key_str = String::from_napi_value(env, key)?;
+          let key_cstr = std::ffi::CString::new(key_str.clone())?;
+
+          let mut header_value: sys::napi_value = ptr::null_mut();
+          check_status!(
+            sys::napi_get_named_property(env, value, key_cstr.as_ptr(), &mut header_value),
+            "Failed to get header value"
+          )?;
+
+          if let Ok(header) = Header::from_napi_value(env, header_value) {
+            headers.set(key_str, header);
+          }
+        }
+      }
+
+      Ok(headers)
+    }
+  }
+
+  impl ToNapiValue for Headers {
+    unsafe fn to_napi_value(env: sys::napi_env, value: Self) -> Result<sys::napi_value> {
+      let mut result: sys::napi_value = ptr::null_mut();
+      unsafe {
+        check_status!(
+          sys::napi_create_object(env, &mut result),
+          "Failed to create Headers object"
+        )?;
+
+        for (key, header) in value.iter() {
+          let key_cstr = std::ffi::CString::new(key.to_string())?;
+          let value_napi_value = Header::to_napi_value(env, header.to_owned())?;
+
+          check_status!(
+            sys::napi_set_named_property(env, result, key_cstr.as_ptr(), value_napi_value),
+            "Failed to set header property"
+          )?;
+        }
+      }
+
+      Ok(result)
+    }
   }
 }

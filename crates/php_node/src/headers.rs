@@ -54,6 +54,7 @@ where
 /// const contentType = headers.get('Content-Type');
 /// ```
 #[napi(js_name = "Headers")]
+#[derive(Debug, Clone, Default)]
 pub struct PhpHeaders {
   headers: Headers,
 }
@@ -62,6 +63,32 @@ impl PhpHeaders {
   // Create a new PHP headers instance.
   pub fn new(headers: Headers) -> Self {
     PhpHeaders { headers }
+  }
+}
+
+#[allow(clippy::from_over_into)]
+impl Into<Headers> for PhpHeaders {
+  fn into(self) -> Headers {
+    self.headers
+  }
+}
+
+impl From<Headers> for PhpHeaders {
+  fn from(headers: Headers) -> Self {
+    PhpHeaders { headers }
+  }
+}
+
+// This replaces the FromNapiValue impl inherited from ClassInstance to allow
+// unwrapping a PhpHeaders instance directly to Headers. This allows both
+// object and instance form of Headers to be used interchangeably.
+impl FromNapiValue for PhpHeaders {
+  unsafe fn from_napi_value(env: sys::napi_env, napi_val: sys::napi_value) -> Result<Self> {
+    let headers = ClassInstance::<PhpHeaders>::from_napi_value(env, napi_val)
+      .map(|php_headers| php_headers.headers.clone())
+      .or_else(|_| Headers::from_napi_value(env, napi_val))?;
+
+    Ok(PhpHeaders { headers })
   }
 }
 
@@ -75,9 +102,9 @@ impl PhpHeaders {
   /// const headers = new Headers();
   /// ```
   #[napi(constructor)]
-  pub fn constructor() -> Self {
+  pub fn constructor(headers: Option<Headers>) -> Self {
     PhpHeaders {
-      headers: Headers::new(),
+      headers: headers.unwrap_or_default(),
     }
   }
 

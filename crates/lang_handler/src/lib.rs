@@ -183,8 +183,6 @@
 //! assert_eq!(response.body(), "Hello, world!");
 //! ```
 
-#[cfg(feature = "c")]
-mod ffi;
 mod handler;
 mod headers;
 mod request;
@@ -192,8 +190,6 @@ mod response;
 pub mod rewrite;
 mod test;
 
-#[cfg(feature = "c")]
-pub use ffi::*;
 pub use handler::Handler;
 pub use headers::{Header, Headers};
 pub use request::{Request, RequestBuilder, RequestBuilderException};
