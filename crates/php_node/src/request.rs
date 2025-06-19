@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use napi::bindgen_prelude::*;
 use napi::Result;
 
@@ -33,9 +31,7 @@ pub struct PhpRequestOptions {
   /// The URL for the request.
   pub url: String,
   /// The headers for the request.
-  /// TODO: Figure out how to accept a Headers instance
-  /// TODO: Figure out how to support both single values without array wrap
-  pub headers: Option<HashMap<String, Vec<String>>>,
+  pub headers: Option<PhpHeaders>,
   /// The body for the request.
   pub body: Option<Uint8Array>,
   /// The socket information for the request.
@@ -114,15 +110,7 @@ impl PhpRequest {
     }
 
     if let Some(headers) = options.headers {
-      for key in headers.keys() {
-        let values = headers.get(key).ok_or_else(|| {
-          Error::from_reason(format!("Missing header values for key \"{}\"", key))
-        })?;
-
-        for value in values {
-          builder = builder.header(key.clone(), value.clone())
-        }
-      }
+      builder = builder.headers(headers);
     }
 
     if let Some(body) = options.body {

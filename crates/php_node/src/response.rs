@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use napi::bindgen_prelude::*;
 use napi::Result;
 
@@ -14,9 +12,7 @@ pub struct PhpResponseOptions {
   /// The HTTP status code for the response.
   pub status: Option<i32>,
   /// The headers for the response.
-  /// TODO: Figure out how to accept a Headers instance
-  /// TODO: Figure out how to support both single values without array wrap
-  pub headers: Option<HashMap<String, Vec<String>>>,
+  pub headers: Option<PhpHeaders>,
   /// The body for the response.
   pub body: Option<Uint8Array>,
   /// The log for the response.
@@ -63,15 +59,7 @@ impl PhpResponse {
     }
 
     if let Some(headers) = options.headers {
-      for key in headers.keys() {
-        let values = headers.get(key).ok_or_else(|| {
-          Error::from_reason(format!("Missing header values for key \"{}\"", key))
-        })?;
-
-        for value in values {
-          builder.header(key.clone(), value.clone());
-        }
-      }
+      builder = builder.headers(headers);
     }
 
     if let Some(body) = options.body {

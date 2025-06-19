@@ -456,6 +456,32 @@ impl RequestBuilder {
     self
   }
 
+  /// Replaces the entire header set of the request.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use lang_handler::{RequestBuilder, Headers};
+  ///
+  /// let mut headers = Headers::new();
+  /// headers.set("Accept", "text/html");
+  ///
+  /// let request = RequestBuilder::new()
+  ///   .url("http://example.com/test.php")
+  ///   .headers(headers)
+  ///   .build()
+  ///   .expect("should build request");
+  ///
+  /// assert_eq!(request.headers().get("Accept"), Some("text/html".to_string()));
+  /// ```
+  pub fn headers<T>(mut self, headers: T) -> Self
+  where
+    T: Into<Headers>,
+  {
+    self.headers = headers.into();
+    self
+  }
+
   /// Sets the body of the request.
   ///
   /// # Examples

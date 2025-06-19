@@ -81,3 +81,14 @@ test('includes iterator methods', (t) => {
     ['content-type', 'application/json', headers]
   ])
 })
+
+test('construct from object', (t) => {
+  const headers = new Headers({
+    'Content-Type': 'application/json',
+    'Accept': ['application/json', 'text/html']
+  })
+  t.assert(headers.has('Content-Type'))
+  t.is(headers.get('Content-Type'), 'application/json')
+  t.assert(headers.has('Accept'))
+  t.deepEqual(headers.getAll('Accept'), ['application/json', 'text/html'])
+})
