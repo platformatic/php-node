@@ -1,11 +1,11 @@
-use std::sync::Arc;
+use std::{ops::Deref, sync::Arc};
 
 use napi::bindgen_prelude::*;
 use napi::{Env, Error, Result, Task};
 
-use php::{Embed, EmbedRequestError, Handler, Request, Response};
-
-use crate::{PhpRequest, PhpResponse, PhpRewriter};
+use php::{Embed, EmbedRequestError, Handler, Request, Response, RequestRewriter};
+use http_handler::napi::{Request as PhpRequest, Response as PhpResponse};
+use http_rewriter::napi::Rewriter as NapiRewriter;
 
 /// Options for creating a new PHP instance.
 #[napi(object)]
@@ -18,7 +18,7 @@ pub struct PhpOptions {
   /// Throw request errors
   pub throw_request_errors: Option<bool>,
   /// Request rewriter
-  pub rewriter: Option<Reference<PhpRewriter>>,
+  pub rewriter: Option<Reference<NapiRewriter>>,
 }
 
 /// A PHP instance.
@@ -73,8 +73,10 @@ impl PhpRuntime {
       })
       .map_err(|_| Error::from_reason("Could not determine docroot"))?;
 
-    let rewriter = if let Some(found) = rewriter {
-      Some(found.into_rewriter()?)
+    let rewriter = if let Some(rewriter_ref) = rewriter {
+      // Dereference to get the actual NapiRewriter and clone it
+      let owned_rewriter = (*rewriter_ref).clone();
+      Some(Box::new(NapiRewriterWrapper(owned_rewriter)) as Box<dyn RequestRewriter>)
     } else {
       None
     };
@@ -119,7 +121,7 @@ impl PhpRuntime {
       PhpRequestTask {
         throw_request_errors: self.throw_request_errors,
         embed: self.embed.clone(),
-        request: request.into(),
+        request: request.deref().clone(),
       },
       signal,
     )
@@ -148,10 +150,10 @@ impl PhpRuntime {
     let mut task = PhpRequestTask {
       throw_request_errors: self.throw_request_errors,
       embed: self.embed.clone(),
-      request: request.into(),
+      request: request.deref().clone(),
     };
 
-    task.compute().map(PhpResponse::new)
+    task.compute().map(Into::<PhpResponse>::into)
   }
 }
 
@@ -169,19 +171,25 @@ impl Task for PhpRequestTask {
 
   // Handle the PHP request in the worker thread.
   fn compute(&mut self) -> Result<Self::Output> {
-    let mut result = self.embed.handle(self.request.clone());
+    let runtime = tokio::runtime::Runtime::new().map_err(|e| Error::from_reason(e.to_string()))?;
+    let mut result = runtime.block_on(self.embed.handle(self.request.clone()));
 
     // Translate the various error types into HTTP error responses
     if !self.throw_request_errors {
       result = result.or_else(|err| {
         Ok(match err {
           EmbedRequestError::ScriptNotFound(_script_name) => {
-            Response::builder().status(404).body("Not Found").build()
+            http_handler::response::Builder::new()
+              .status(404)
+              .body(bytes::BytesMut::from("Not Found"))
+              .unwrap()
           }
-          _ => Response::builder()
-            .status(500)
-            .body("Internal Server Error")
-            .build(),
+          _ => {
+            http_handler::response::Builder::new()
+              .status(500)
+              .body(bytes::BytesMut::from("Internal Server Error"))
+              .unwrap()
+          }
         })
       })
     }
@@ -191,6 +199,16 @@ impl Task for PhpRequestTask {
 
   // Handle converting the PHP response to a JavaScript response in the main thread.
   fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
-    Ok(PhpResponse::new(output))
+    Ok(Into::<PhpResponse>::into(output))
+  }
+}
+
+// Wrapper to adapt NapiRewriter to RequestRewriter
+struct NapiRewriterWrapper(NapiRewriter);
+
+impl RequestRewriter for NapiRewriterWrapper {
+  fn rewrite_request(&self, request: Request) -> std::result::Result<Request, http_rewriter::RewriteError> {
+    // Call the Rewriter trait method explicitly  
+    <NapiRewriter as http_rewriter::Rewriter>::rewrite(&self.0, request)
   }
 }

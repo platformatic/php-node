@@ -12,7 +12,8 @@ use ext_php_rs::{
   zend::{try_catch, try_catch_first, ExecutorGlobals, SapiGlobals},
 };
 
-use lang_handler::{rewrite::Rewriter, Handler, Request, Response};
+use http_handler::{Handler, Request, Response};
+use http_rewriter::RewriteError;
 
 use super::{
   sapi::{ensure_sapi, Sapi},
@@ -20,6 +21,12 @@ use super::{
   strings::translate_path,
   EmbedRequestError, EmbedStartError, RequestContext,
 };
+
+/// A simple trait for rewriting requests that works with our specific request type
+pub trait RequestRewriter: Send + Sync {
+  /// Rewrite the given request and return the modified request
+  fn rewrite_request(&self, request: Request) -> Result<Request, RewriteError>;
+}
 
 /// Embed a PHP script into a Rust application to handle HTTP requests.
 pub struct Embed {
@@ -30,7 +37,7 @@ pub struct Embed {
   #[allow(dead_code)]
   sapi: Arc<Sapi>,
 
-  rewriter: Option<Box<dyn Rewriter>>,
+  rewriter: Option<Box<dyn RequestRewriter>>,
 }
 
 impl std::fmt::Debug for Embed {
@@ -39,7 +46,7 @@ impl std::fmt::Debug for Embed {
       .field("docroot", &self.docroot)
       .field("args", &self.args)
       .field("sapi", &self.sapi)
-      .field("rewriter", &"Box<dyn Rewriter>")
+      .field("rewriter", &"Box<dyn RequestRewriter>")
       .finish()
   }
 }
@@ -63,7 +70,7 @@ impl Embed {
   ///
   /// let embed = Embed::new(docroot, None);
   /// ```
-  pub fn new<C>(docroot: C, rewriter: Option<Box<dyn Rewriter>>) -> Result<Self, EmbedStartError>
+  pub fn new<C>(docroot: C, rewriter: Option<Box<dyn RequestRewriter>>) -> Result<Self, EmbedStartError>
   where
     C: AsRef<Path>,
   {
@@ -85,7 +92,7 @@ impl Embed {
   /// ```
   pub fn new_with_args<C>(
     docroot: C,
-    rewriter: Option<Box<dyn Rewriter>>,
+    rewriter: Option<Box<dyn RequestRewriter>>,
     args: Args,
   ) -> Result<Self, EmbedStartError>
   where
@@ -111,7 +118,7 @@ impl Embed {
   /// ```
   pub fn new_with_argv<C, S>(
     docroot: C,
-    rewriter: Option<Box<dyn Rewriter>>,
+    rewriter: Option<Box<dyn RequestRewriter>>,
     argv: Vec<S>,
   ) -> Result<Self, EmbedStartError>
   where
@@ -152,6 +159,7 @@ impl Embed {
   }
 }
 
+#[async_trait::async_trait]
 impl Handler for Embed {
   type Error = EmbedRequestError;
 
@@ -171,37 +179,40 @@ impl Handler for Embed {
   /// let handler = Embed::new(docroot.clone(), None)
   ///   .expect("should construct Embed");
   ///
-  /// let request = Request::builder()
+  /// let request = http_handler::request::Request::builder()
   ///   .method("GET")
-  ///   .url("http://example.com")
-  ///   .build()
+  ///   .uri("http://example.com")
+  ///   .body(bytes::BytesMut::new())
   ///   .expect("should build request");
   ///
+  /// # tokio_test::block_on(async {
   /// let response = handler.handle(request)
+  ///   .await
   ///   .expect("should handle request");
+  /// # });
   ///
   /// //assert_eq!(response.status(), 200);
   /// //assert_eq!(response.body(), "Hello, world!");
   /// ```
-  fn handle(&self, request: Request) -> Result<Response, Self::Error> {
+  async fn handle(&self, request: Request) -> Result<Response, Self::Error> {
     let docroot = self.docroot.clone();
 
     // Initialize the SAPI module
     self.sapi.startup()?;
 
     // Get REQUEST_URI _first_ as it needs the pre-rewrite state.
-    let url = request.url();
+    let url = request.uri();
     let request_uri = url.path();
 
     // Apply request rewriting rules
     let mut request = request.clone();
     if let Some(rewriter) = &self.rewriter {
       request = rewriter
-        .rewrite(request, &docroot)
-        .map_err(EmbedRequestError::RequestRewriteError)?;
+        .rewrite_request(request)
+        .map_err(|e| EmbedRequestError::RequestRewriteError(e.to_string()))?;
     }
 
-    let translated_path = translate_path(&docroot, request.url().path())?
+    let translated_path = translate_path(&docroot, request.uri().path())?
       .display()
       .to_string();
 
@@ -210,17 +221,19 @@ impl Handler for Embed {
     let path_translated = estrdup(translated_path.clone());
 
     // Extract request method, query string, and headers
-    let request_method = estrdup(request.method());
+    let request_method = estrdup(request.method().as_str());
     let query_string = estrdup(url.query().unwrap_or(""));
 
     let headers = request.headers();
     let content_type = headers
       .get("Content-Type")
+      .and_then(|v| v.to_str().ok())
       .map(estrdup)
       .unwrap_or(std::ptr::null_mut());
     let content_length = headers
       .get("Content-Length")
-      .map(|v| v.parse::<i64>().unwrap_or(0))
+      .and_then(|v| v.to_str().ok())
+      .and_then(|s| s.parse::<i64>().ok())
       .unwrap_or(0);
 
     // Prepare argv and argc
@@ -232,8 +245,11 @@ impl Handler for Embed {
 
     let script_name = translated_path.clone();
 
-    let response = try_catch_first(|| {
-      RequestContext::for_request(request.clone(), docroot.clone());
+    // Fixed RefUnwindSafe issue (FIXME.md #1) by setting up RequestContext before try_catch_first
+    // This avoids the need to rebuild the request inside the closure
+    RequestContext::for_request(request, docroot.clone());
+
+    let response = try_catch_first(move || {
 
       // Set server context
       {
@@ -259,67 +275,66 @@ impl Handler for Embed {
         globals.request_info.content_length = content_length;
       }
 
-      let response_builder = {
-        let _request_scope = RequestScope::new()?;
+      let _request_scope = RequestScope::new()?;
 
-        // Run script in its own try/catch so bailout doesn't skip request shutdown.
+      // Run script in its own try/catch so bailout doesn't skip request shutdown.
+      {
+        let mut file_handle = FileHandleScope::new(script_name.clone());
+        try_catch(|| unsafe { php_execute_script(file_handle.deref_mut()) })
+          .map_err(|_| EmbedRequestError::Bailout)?;
+      }
+
+      if let Some(err) = ExecutorGlobals::take_exception() {
         {
-          let mut file_handle = FileHandleScope::new(script_name.clone());
-          try_catch(|| unsafe { php_execute_script(file_handle.deref_mut()) })
-            .map_err(|_| EmbedRequestError::Bailout)?;
+          let mut globals = SapiGlobals::get_mut();
+          globals.sapi_headers.http_response_code = 500;
         }
 
-        if let Some(err) = ExecutorGlobals::take_exception() {
-          {
-            let mut globals = SapiGlobals::get_mut();
-            globals.sapi_headers.http_response_code = 500;
-          }
+        let ex = Error::Exception(err);
 
-          let ex = Error::Exception(err);
-
-          if let Some(ctx) = RequestContext::current() {
-            ctx.response_builder().exception(ex.to_string());
-          }
-
-          return Err(EmbedRequestError::Exception(ex.to_string()));
-        };
-
-        let (mut mimetype, http_response_code) = {
-          let h = SapiGlobals::get().sapi_headers;
-          (h.mimetype, h.http_response_code)
-        };
-
-        if mimetype.is_null() {
-          mimetype = unsafe { sapi_get_default_content_type() };
+        // Fixed exception handling (FIXME.md #3) by using ResponseExt::set_exception
+        if let Some(ctx) = RequestContext::current() {
+          ctx.set_response_exception(ex.to_string());
+          ctx.set_response_status(500);
         }
 
-        let mime_ptr =
-          unsafe { mimetype.as_ref() }.ok_or(EmbedRequestError::FailedToDetermineContentType)?;
-
-        let mime = unsafe { std::ffi::CStr::from_ptr(mime_ptr) }
-          .to_str()
-          .map_err(|_| EmbedRequestError::FailedToDetermineContentType)?
-          .to_owned();
-
-        unsafe {
-          efree(mimetype.cast::<u8>());
-        }
-
-        RequestContext::current()
-          .map(|ctx| {
-            ctx
-              .response_builder()
-              .status(http_response_code)
-              .header("Content-Type", mime)
-          })
-          .ok_or(EmbedRequestError::ResponseBuildError)?
+        return Err(EmbedRequestError::Exception(ex.to_string()));
       };
 
-      Ok(response_builder.build())
+      let (mut mimetype, http_response_code) = {
+        let h = SapiGlobals::get().sapi_headers;
+        (h.mimetype, h.http_response_code)
+      };
+
+      if mimetype.is_null() {
+        mimetype = unsafe { sapi_get_default_content_type() };
+      }
+
+      let mime_ptr =
+        unsafe { mimetype.as_ref() }.ok_or(EmbedRequestError::FailedToDetermineContentType)?;
+
+      let mime = unsafe { std::ffi::CStr::from_ptr(mime_ptr) }
+        .to_str()
+        .map_err(|_| EmbedRequestError::FailedToDetermineContentType)?
+        .to_owned();
+
+      unsafe {
+        efree(mimetype.cast::<u8>());
+      }
+
+      // Set the final status and content-type header using the new clean API (FIXME.md #4)
+      if let Some(ctx) = RequestContext::current() {
+        ctx.set_response_status(http_response_code as u16);
+        ctx.add_response_header("Content-Type", mime);
+      }
+
+      // Build the final response with accumulated data using the extension system
+      RequestContext::reclaim()
+        .ok_or(EmbedRequestError::ResponseBuildError)?
+        .build_response()
+        .map_err(|_| EmbedRequestError::ResponseBuildError)
     })
     .unwrap_or(Err(EmbedRequestError::Bailout))?;
-
-    RequestContext::reclaim();
 
     Ok(response)
   }

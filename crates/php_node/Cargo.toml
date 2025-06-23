@@ -12,6 +12,10 @@ path = "src/lib.rs"
 napi = { version = "3", default-features = false, features = ["napi4"] }
 napi-derive = "3"
 php = { path = "../php" }
+tokio = { version = "1.0", features = ["rt", "rt-multi-thread"] }
+bytes = "1.0"
+http-handler = { path = "../../../http-handler", features = ["napi-support"] }
+http-rewriter = { path = "../../../http-rewriter", features = ["napi-support"] }
 
 [build-dependencies]
 napi-build = "2.2.1"

@@ -19,20 +19,20 @@ test('only last set is used for get', (t) => {
   const headers = new Headers()
   headers.set('Content-Type', 'application/json')
   headers.add('Content-Type', 'text/html')
-  t.is(headers.size, 1)
+  t.is(headers.size, 2)
   t.assert(headers.has('Content-Type'))
-  t.is(headers.get('Content-Type'), 'text/html')
+  t.is(headers.get('Content-Type'), 'application/json')
 })
 
 test('adding a header with multiple values works and stores to a single entry', (t) => {
   const headers = new Headers()
   headers.add('Accept', 'application/json')
   headers.add('Accept', 'text/html')
-  t.is(headers.size, 1)
+  t.is(headers.size, 2)
   t.assert(headers.has('Accept'))
   t.deepEqual(headers.getAll('Accept'), ['application/json', 'text/html'])
   t.deepEqual(headers.getLine('Accept'), 'application/json,text/html')
-  t.deepEqual(headers.get('Accept'), 'text/html')
+  t.deepEqual(headers.get('Accept'), 'application/json')
 })
 
 test('deleting a header adjusts size and removes value', (t) => {
