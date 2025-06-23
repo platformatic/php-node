@@ -3,7 +3,7 @@ use napi::Result;
 
 use php::{Request, RequestBuilder};
 
-use crate::PhpHeaders;
+use crate::{PhpHeaders, PhpHeadersInput};
 
 #[napi(object)]
 #[derive(Default)]
@@ -31,7 +31,7 @@ pub struct PhpRequestOptions {
   /// The URL for the request.
   pub url: String,
   /// The headers for the request.
-  pub headers: Option<PhpHeaders>,
+  pub headers: Option<PhpHeadersInput>,
   /// The body for the request.
   pub body: Option<Uint8Array>,
   /// The socket information for the request.
@@ -110,7 +110,7 @@ impl PhpRequest {
     }
 
     if let Some(headers) = options.headers {
-      builder = builder.headers(headers);
+      builder = builder.headers(Into::<PhpHeaders>::into(headers));
     }
 
     if let Some(body) = options.body {
