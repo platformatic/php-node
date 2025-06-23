@@ -332,13 +332,13 @@ impl PhpHeaders {
   /// });
   /// ```
   #[napi]
-  pub fn for_each<F: Fn(String, String, &This) -> Result<()>>(
+  pub fn for_each<F: Fn(String, String, This) -> Result<()>>(
     &self,
     this: This,
     callback: F,
   ) -> Result<()> {
     for entry in self.entries() {
-      callback(entry.1, entry.0, &this)?;
+      callback(entry.1, entry.0, this)?;
     }
     Ok(())
   }
