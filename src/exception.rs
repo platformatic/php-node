@@ -1,5 +1,3 @@
-use lang_handler::RequestBuilderException;
-
 /// Set of exceptions which may be produced by php::Embed
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub enum EmbedStartError {
@@ -74,7 +72,7 @@ pub enum EmbedRequestError {
   FailedToSetRequestInfo(String),
 
   /// Error during request rewriting
-  RequestRewriteError(RequestBuilderException),
+  RequestRewriteError(String),
 }
 
 impl std::fmt::Display for EmbedRequestError {

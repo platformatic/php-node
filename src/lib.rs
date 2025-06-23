@@ -24,42 +24,60 @@
 //! let embed = Embed::new_with_args(docroot, None, args())
 //!   .expect("should construct embed");
 //!
-//! let request = Request::builder()
+//! let request = http_handler::request::Request::builder()
 //!   .method("POST")
-//!   .url("http://example.com/index.php")
+//!   .uri("http://example.com/index.php")
 //!   .header("Content-Type", "text/html")
-//!   .header("Content-Length", 13.to_string())
-//!   .body("Hello, World!")
-//!   .build()
+//!   .header("Content-Length", "13")
+//!   .body(bytes::BytesMut::from("Hello, World!"))
 //!   .expect("should build request");
 //!
+//! # tokio_test::block_on(async {
 //! let response = embed
 //!   .handle(request.clone())
+//!   .await
 //!   .expect("should handle request");
 //!
 //! assert_eq!(response.status(), 200);
 //! assert_eq!(response.body(), "Hello, World!");
 //! println!("Response: {:#?}", response);
+//! # });
 //! ```
 
 #![warn(rust_2018_idioms)]
 #![warn(clippy::dbg_macro, clippy::print_stdout)]
 #![warn(missing_docs)]
 
+#[cfg(feature = "napi-support")]
+#[macro_use]
+extern crate napi_derive;
+
 mod embed;
 mod exception;
 mod request_context;
+mod rewriter_impl;
 mod sapi;
 mod scopes;
 mod strings;
 mod test;
 
-pub use lang_handler::{
-  rewrite, Handler, Header, Headers, Request, RequestBuilder, RequestBuilderException, Response,
-  ResponseBuilder, Url,
+#[cfg(feature = "napi-support")]
+/// NAPI bindings for exposing PHP to Node.js
+pub mod napi;
+
+pub use http_handler::{
+  Handler, Request, RequestBuilderExt, Response, ResponseException, ResponseExt,
+};
+pub use http_rewriter as rewrite;
+
+// Re-export commonly used types from http crate
+pub use http_handler::{
+  header::HeaderName as Header, HeaderMap as Headers, HeaderName, HeaderValue, Method, StatusCode,
+  Uri as Url,
 };
 
-pub use embed::Embed;
+pub use embed::{Embed, RequestRewriter};
 pub use exception::{EmbedRequestError, EmbedStartError};
 pub use request_context::RequestContext;
+pub use rewriter_impl::*;
 pub use test::{MockRoot, MockRootBuilder};
