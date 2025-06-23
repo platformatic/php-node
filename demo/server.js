@@ -26,8 +26,8 @@ const server = createServer(async (req, res) => {
 
   const url = urlForRequest(req)
 
-  // Every page except /info.php should show the homepage.
-  if (url.pathname !== '/info.php') {
+  // Every page except /index.php should show the homepage.
+  if (url.pathname !== '/index.php') {
     res.writeHead(200, {
       'Content-Type': 'text/html'
     })
@@ -57,7 +57,7 @@ const server = createServer(async (req, res) => {
 
 server.listen(3000, async () => {
   const { port } = server.address()
-  const url = `http://localhost:${port}/info.php`
+  const url = `http://localhost:${port}/index.php`
 
   const res = await fetch(url, {
     method: 'POST',
