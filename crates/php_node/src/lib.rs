@@ -7,7 +7,7 @@ mod response;
 mod rewriter;
 mod runtime;
 
-pub use headers::PhpHeaders;
+pub use headers::{PhpHeaders, PhpHeadersInput};
 pub use request::PhpRequest;
 pub use response::PhpResponse;
 pub use rewriter::PhpRewriter;

@@ -1,4 +1,4 @@
-use std::ptr;
+use std::{collections::HashMap, ptr};
 
 use napi::bindgen_prelude::*;
 use napi::Result;
@@ -73,22 +73,35 @@ impl Into<Headers> for PhpHeaders {
   }
 }
 
-impl From<Headers> for PhpHeaders {
-  fn from(headers: Headers) -> Self {
+pub type PhpHeadersMap = HashMap<String, Either<String, Vec<String>>>;
+pub type PhpHeadersInput = Either<ClassInstance<PhpHeaders>, PhpHeadersMap>;
+
+impl From<PhpHeadersMap> for PhpHeaders {
+  fn from(map: PhpHeadersMap) -> Self {
+    let mut headers = Headers::new();
+
+    // Convert the map to a Headers instance.
+    for (k, v) in map.into_iter() {
+      match v {
+        Either::A(value) => headers.set(k, value),
+        Either::B(values) => {
+          for value in values {
+            headers.add(k.clone(), value);
+          }
+        }
+      }
+    }
+
     PhpHeaders { headers }
   }
 }
 
-// This replaces the FromNapiValue impl inherited from ClassInstance to allow
-// unwrapping a PhpHeaders instance directly to Headers. This allows both
-// object and instance form of Headers to be used interchangeably.
-impl FromNapiValue for PhpHeaders {
-  unsafe fn from_napi_value(env: sys::napi_env, napi_val: sys::napi_value) -> Result<Self> {
-    let headers = ClassInstance::<PhpHeaders>::from_napi_value(env, napi_val)
-      .map(|php_headers| php_headers.headers.clone())
-      .or_else(|_| Headers::from_napi_value(env, napi_val))?;
-
-    Ok(PhpHeaders { headers })
+impl From<PhpHeadersInput> for PhpHeaders {
+  fn from(input: PhpHeadersInput) -> Self {
+    match input {
+      Either::A(instance) => instance.clone(),
+      Either::B(map) => map.into(),
+    }
   }
 }
 
@@ -102,9 +115,13 @@ impl PhpHeaders {
   /// const headers = new Headers();
   /// ```
   #[napi(constructor)]
-  pub fn constructor(headers: Option<Headers>) -> Self {
-    PhpHeaders {
-      headers: headers.unwrap_or_default(),
+  pub fn constructor(input: Option<PhpHeadersInput>) -> Self {
+    match input {
+      None => PhpHeaders {
+        headers: Headers::new(),
+      },
+      Some(Either::A(input)) => input.clone(),
+      Some(Either::B(input)) => input.into(),
     }
   }
 
