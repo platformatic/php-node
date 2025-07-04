@@ -43,7 +43,7 @@ jobs:
             build: pnpm build
             setup: |
               brew install autoconf automake libtool re2c bison libiconv \
-              argon2 libzip
+              argon2 libzip postgresql@16
 
           # TODO: Do we need to care about x86_64 macOS?
           # NOTE: Unable to force link bison on macOS 13, which php-src requires.
@@ -53,7 +53,7 @@ jobs:
             build: pnpm build
             setup: |
               brew install autoconf automake libtool re2c bison libiconv \
-              argon2 libzip
+              argon2 libzip postgresql@16
 
           #
           # Linux
@@ -71,7 +71,7 @@ jobs:
                 libcurl4-openssl-dev autoconf libxml2-dev libsqlite3-dev \
                 bison re2c libonig-dev patchelf zlib1g-dev openssh-client git \
                 libclang-dev libreadline-dev libpng-dev libjpeg-dev libzip-dev \
-                libsodium-dev libargon2-dev
+                libsodium-dev libargon2-dev libpq-dev
 
           # TODO: Can't use the musl container, need to build with ssh-agent access.
           # TODO: Fails because missing x86_64-linux-musl-gcc
@@ -161,6 +161,7 @@ jobs:
             export PATH="$(brew --prefix bison)/bin:$PATH"
             export LDFLAGS="$LDFLAGS -L$(brew --prefix bison)/lib"
             export CPPFLAGS="$CPPFLAGS -I$(brew --prefix bison)/include"
+            export PKG_CONFIG_PATH="$(brew --prefix postgresql@16)/lib/pkgconfig"
           fi
 
           cd php-src
@@ -176,6 +177,7 @@ jobs:
             --enable-zts \
             --enable-mysqlnd --with-pdo-mysql=mysqlnd --with-mysqli=mysqlnd \
             --with-pdo-sqlite=/usr --with-sqlite3=/usr \
+            --with-pdo-pgsql --with-pgsql \
             --with-openssl --with-password-argon2 --with-sodium=shared \
             --with-curl \
             --enable-mbstring --with-mhash \
@@ -226,6 +228,7 @@ jobs:
               --enable-zts \
               --enable-mysqlnd --with-pdo-mysql=mysqlnd --with-mysqli=mysqlnd \
               --with-pdo-sqlite=/usr --with-sqlite3=/usr \
+              --with-pdo-pgsql=/usr --with-pgsql=/usr \
               --with-openssl --with-password-argon2 --with-sodium=shared \
               --with-curl \
               --enable-mbstring --with-mhash \
@@ -303,12 +306,12 @@ jobs:
             target: x86_64-apple-darwin
             architecture: x64
             setup: |
-              brew install openssl@3 argon2
+              brew install openssl@3 argon2 postgresql@16
           - host: macos-15
             target: aarch64-apple-darwin
             architecture: arm64
             setup: |
-              brew install openssl@3 argon2 libzip
+              brew install openssl@3 argon2 libzip postgresql@16
           # - host: windows-latest
           #   target: x86_64-pc-windows-msvc
           #   architecture: x64
@@ -428,7 +431,7 @@ jobs:
               libcurl4-openssl-dev autoconf libxml2-dev libsqlite3-dev \
               bison re2c libonig-dev libargon2-dev libzip-dev zlib1g-dev \
               openssh-client libclang-dev libreadline-dev libpng-dev \
-              libjpeg-dev libsodium-dev
+              libjpeg-dev libsodium-dev libpq5
 
             npm run test
 
