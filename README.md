@@ -19,13 +19,13 @@ as listed below:
 ```sh
 sudo apt-get update
 sudo apt-get install -y libssl-dev libcurl4-openssl-dev libxml2-dev \
-  libsqlite3-dev libonig-dev re2c
+  libsqlite3-dev libonig-dev re2c libpq5
 ```
 
 ### macOS
 
 ```sh
-brew install openssl@3 curl sqlite libxml2 oniguruma
+brew install openssl@3 curl sqlite libxml2 oniguruma postgresql@16
 ```
 
 ## Install

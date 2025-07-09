@@ -7,7 +7,7 @@
 Install the following tools:
 
 ```
-brew install autoconf automake libtool re2c bison libiconv
+brew install autoconf automake libtool re2c bison libiconv postgresql@16
 ```
 
 Add the following to your `~/.bash_profile` or `~/.zshrc`:
@@ -30,6 +30,7 @@ cd php-src
 if [[ "$(uname)" == "Darwin" ]]; then
   export PATH="$(brew --prefix bison)/bin:$(brew --prefix libiconv)/bin:$PATH"
   export LDFLAGS="$LDFLAGS -L$(brew --prefix bison)/lib -L$(brew --prefix libiconv)/lib -L$(brew --prefix readline)/lib"
+  export PKG_CONFIG_PATH="$(brew --prefix postgresql@16)/lib/pkgconfig"
 fi
 
 ./buildconf
@@ -42,6 +43,7 @@ fi
   --enable-zts \
   --enable-mysqlnd --with-pdo-mysql=mysqlnd --with-mysqli=mysqlnd \
   --with-pdo-sqlite=/usr --with-sqlite3=/usr \
+  --with-pdo-pgsql --with-pgsql \
   --with-openssl --with-password-argon2 --with-sodium=shared \
   --with-curl \
   --enable-mbstring --with-mhash \
