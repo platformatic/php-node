@@ -10,10 +10,11 @@ use bytes::Buf;
 use ext_php_rs::{
   alloc::{efree, estrdup},
   builders::SapiBuilder,
-  embed::SapiModule,
+  embed::{
+    ext_php_rs_sapi_per_thread_init, ext_php_rs_sapi_shutdown, ext_php_rs_sapi_startup, SapiModule,
+  },
   // exception::register_error_observer,
   ffi::{
-    ext_php_rs_sapi_per_thread_init, ext_php_rs_sapi_shutdown, ext_php_rs_sapi_startup,
     php_module_shutdown, php_module_startup, php_register_variable, sapi_send_headers,
     sapi_shutdown, sapi_startup, ZEND_RESULT_CODE_SUCCESS,
   },
