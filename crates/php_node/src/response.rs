@@ -3,7 +3,7 @@ use napi::Result;
 
 use php::Response;
 
-use crate::PhpHeaders;
+use crate::{PhpHeaders, PhpHeadersInput};
 
 /// Options for creating a new PHP response.
 #[napi(object)]
@@ -12,7 +12,7 @@ pub struct PhpResponseOptions {
   /// The HTTP status code for the response.
   pub status: Option<i32>,
   /// The headers for the response.
-  pub headers: Option<PhpHeaders>,
+  pub headers: Option<PhpHeadersInput>,
   /// The body for the response.
   pub body: Option<Uint8Array>,
   /// The log for the response.
@@ -59,7 +59,7 @@ impl PhpResponse {
     }
 
     if let Some(headers) = options.headers {
-      builder = builder.headers(headers);
+      builder = builder.headers(Into::<PhpHeaders>::into(headers));
     }
 
     if let Some(body) = options.body {
