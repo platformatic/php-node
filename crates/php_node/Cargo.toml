@@ -9,9 +9,9 @@ path = "src/lib.rs"
 
 [dependencies]
 # Default enable napi4 feature, see https://nodejs.org/api/n-api.html#node-api-version-matrix
-napi = { version = "2.16.17", default-features = false, features = ["napi4"] }
-napi-derive = "2.16.13"
+napi = { version = "3", default-features = false, features = ["napi4"] }
+napi-derive = "3"
 php = { path = "../php" }
 
 [build-dependencies]
-napi-build = "2.0.1"
+napi-build = "2.2.1"
