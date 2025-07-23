@@ -1,0 +1,2 @@
+[env]
+EXT_PHP_RS_ALLOWED_BINDINGS = "php_execute_script,sapi_send_headers,sapi_get_default_content_type,php_register_variable,SAPI_OPTION_NO_CHDIR"
