@@ -486,10 +486,10 @@ headers.set('Content-Type', 'application/json')
 headers.add('Accept', 'application/json')
 headers.add('Accept', 'text/html')
 
-for (const (name, value) of headers.entries()) {
-  // ('Content-Type', 'application/json')
-  // ('Accept', 'application/json')
-  // ('Accept', 'text/html')
+for (const [name, value] of headers.entries()) {
+  // ['Content-Type', 'application/json']
+  // ['Accept', 'application/json']
+  // ['Accept', 'text/html']
 }
 ```
 
