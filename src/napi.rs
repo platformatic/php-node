@@ -76,7 +76,8 @@ impl PhpRuntime {
     let rewriter = if let Some(rewriter_ref) = rewriter {
       // Dereference to get the actual NapiRewriter and clone it
       let owned_rewriter = (*rewriter_ref).clone();
-      Some(Box::new(NapiRewriterWrapper(owned_rewriter)) as Box<dyn RequestRewriter>)
+      // Thanks to the blanket impl, NapiRewriter automatically implements RequestRewriter
+      Some(Box::new(owned_rewriter) as Box<dyn RequestRewriter>)
     } else {
       None
     };
@@ -196,18 +197,5 @@ impl Task for PhpRequestTask {
   // Handle converting the PHP response to a JavaScript response in the main thread.
   fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
     Ok(Into::<PhpResponse>::into(output))
-  }
-}
-
-// Wrapper to adapt NapiRewriter to RequestRewriter
-struct NapiRewriterWrapper(NapiRewriter);
-
-impl RequestRewriter for NapiRewriterWrapper {
-  fn rewrite_request(
-    &self,
-    request: Request,
-  ) -> std::result::Result<Request, http_rewriter::RewriteError> {
-    // Call the Rewriter trait method explicitly
-    <NapiRewriter as http_rewriter::Rewriter>::rewrite(&self.0, request)
   }
 }

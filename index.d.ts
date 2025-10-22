@@ -721,7 +721,7 @@ export declare class ConditionalRewriter {
    * const rewritten = rewriter.rewrite(request);
    * ```
    */
-  rewrite(request: Request): Request
+  rewrite(request: Request, docroot?: string | undefined | null): Request
   /**
    * Chain this rewriter with another, creating a sequence that applies both in order
    *
@@ -887,7 +887,7 @@ export declare class HeaderRewriter {
    * const rewritten = rewriter.rewrite(request);
    * ```
    */
-  rewrite(request: Request): Request
+  rewrite(request: Request, docroot?: string | undefined | null): Request
   /**
    * Chain this rewriter with another, creating a sequence that applies both in order
    *
@@ -931,7 +931,7 @@ export declare class HrefRewriter {
    * const rewritten = rewriter.rewrite(request);
    * ```
    */
-  rewrite(request: Request): Request
+  rewrite(request: Request, docroot?: string | undefined | null): Request
   /**
    * Chain this rewriter with another, creating a sequence that applies both in order
    *
@@ -1019,7 +1019,7 @@ export declare class MethodRewriter {
    * const rewritten = rewriter.rewrite(request);
    * ```
    */
-  rewrite(request: Request): Request
+  rewrite(request: Request, docroot?: string | undefined | null): Request
   /**
    * Chain this rewriter with another, creating a sequence that applies both in order
    *
@@ -1151,7 +1151,7 @@ export declare class PathRewriter {
    * const rewritten = rewriter.rewrite('/path/to/resource');
    * ```
    */
-  rewrite(request: Request): Request
+  rewrite(request: Request, docroot?: string | undefined | null): Request
   /**
    * Chain this rewriter with another, creating a sequence that applies both in order
    *
@@ -1212,9 +1212,11 @@ export declare class Rewriter {
    *
    * ```js
    * const rewritten = rewriter.rewrite(request);
+   * // Or with explicit docroot:
+   * const rewritten = rewriter.rewrite(request, '/var/www/html');
    * ```
    */
-  rewrite(request: Request): Request
+  rewrite(request: Request, docroot?: string | undefined | null): Request
 }
 
 /** A N-API wrapper for the `SequenceRewriter` type. */
@@ -1228,7 +1230,7 @@ export declare class SequenceRewriter {
    * const rewritten = rewriter.rewrite(request);
    * ```
    */
-  rewrite(request: Request): Request
+  rewrite(request: Request, docroot?: string | undefined | null): Request
   /**
    * Chain this rewriter with another, creating a sequence that applies both in order
    *

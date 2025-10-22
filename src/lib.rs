@@ -8,8 +8,8 @@
 //! ```rust
 //! use std::env::{args, current_dir};
 //! # use std::path::PathBuf;
-//! # use php::MockRoot;
-//! use php::{
+//! # use php_node::MockRoot;
+//! use php_node::{
 //!   rewrite::{PathRewriter, Rewriter},
 //!   Embed, Handler, Request,
 //! };
@@ -55,7 +55,6 @@ extern crate napi_derive;
 mod embed;
 mod exception;
 mod request_context;
-mod rewriter_impl;
 mod sapi;
 mod scopes;
 mod strings;
@@ -79,5 +78,4 @@ pub use http_handler::{
 pub use embed::{Embed, RequestRewriter};
 pub use exception::{EmbedRequestError, EmbedStartError};
 pub use request_context::RequestContext;
-pub use rewriter_impl::*;
 pub use test::{MockRoot, MockRootBuilder};

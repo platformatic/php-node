@@ -24,7 +24,35 @@ use super::{
 /// A simple trait for rewriting requests that works with our specific request type
 pub trait RequestRewriter: Send + Sync {
   /// Rewrite the given request and return the modified request
-  fn rewrite_request(&self, request: Request) -> Result<Request, http_rewriter::RewriteError>;
+  ///
+  /// The docroot parameter is used by conditions like ExistenceCondition that need
+  /// to check for files on the filesystem.
+  fn rewrite_request(
+    &self,
+    request: Request,
+    docroot: &Path,
+  ) -> Result<Request, http_rewriter::RewriteError>;
+}
+
+/// Blanket implementation: any type implementing http_rewriter::Rewriter
+/// automatically implements RequestRewriter for our concrete Request type.
+impl<T> RequestRewriter for T
+where
+  T: http_rewriter::Rewriter,
+{
+  fn rewrite_request(
+    &self,
+    request: Request,
+    docroot: &Path,
+  ) -> Result<Request, http_rewriter::RewriteError> {
+    use http_handler::extensions::DocumentRoot;
+    use http_handler::RequestExt;
+    let mut request = request;
+    request.set_document_root(DocumentRoot {
+      path: docroot.to_path_buf(),
+    });
+    http_rewriter::Rewriter::rewrite(self, request)
+  }
 }
 
 /// Embed a PHP script into a Rust application to handle HTTP requests.
@@ -62,7 +90,7 @@ impl Embed {
   ///
   /// ```
   /// use std::env::current_dir;
-  /// use php::Embed;
+  /// use php_node::Embed;
   ///
   /// let docroot = current_dir()
   ///   .expect("should have current_dir");
@@ -85,7 +113,7 @@ impl Embed {
   ///
   /// ```
   /// use std::env::{args, current_dir};
-  /// use php::Embed;
+  /// use php_node::Embed;
   ///
   /// let docroot = current_dir()
   ///   .expect("should have current_dir");
@@ -109,7 +137,7 @@ impl Embed {
   ///
   /// ```
   /// use std::env::current_dir;
-  /// use php::{Embed, Handler, Request, Response};
+  /// use php_node::{Embed, Handler, Request, Response};
   ///
   /// let docroot = current_dir()
   ///   .expect("should have current_dir");
@@ -146,7 +174,7 @@ impl Embed {
   ///
   /// ```rust
   /// use std::env::current_dir;
-  /// use php::Embed;
+  /// use php_node::Embed;
   ///
   /// let docroot = current_dir()
   ///   .expect("should have current_dir");
@@ -171,7 +199,7 @@ impl Handler for Embed {
   ///
   /// ```
   /// use std::{env::temp_dir, fs::File, io::Write};
-  /// use php::{Embed, Handler, Request, Response, MockRoot};
+  /// use php_node::{Embed, Handler, Request, Response, MockRoot};
   ///
   /// let docroot = MockRoot::builder()
   ///   .file("index.php", "<?php echo \"Hello, World!\"; ?>")
@@ -210,7 +238,7 @@ impl Handler for Embed {
     let mut request = request.clone();
     if let Some(rewriter) = &self.rewriter {
       request = rewriter
-        .rewrite_request(request)
+        .rewrite_request(request, &self.docroot)
         .map_err(|e| EmbedRequestError::RequestRewriteError(e.to_string()))?;
     }
 

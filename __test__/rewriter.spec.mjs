@@ -7,7 +7,6 @@ const filename = import.meta.filename.replace(docroot, '')
 
 test('existence condition', (t) => {
   const req = new Request({
-    docroot,
     method: 'GET',
     url: `http://example.com${filename}`,
     headers: {
@@ -29,12 +28,11 @@ test('existence condition', (t) => {
     }
   ])
 
-  t.is(rewriter.rewrite(req).url, 'http://example.com/404')
+  t.is(rewriter.rewrite(req, docroot).url, 'http://example.com/404')
 })
 
 test('non-existence condition', (t) => {
   const req = new Request({
-    docroot,
     method: 'GET',
     url: 'http://example.com/index.php',
     headers: {
@@ -56,7 +54,7 @@ test('non-existence condition', (t) => {
     }
   ])
 
-  t.is(rewriter.rewrite(req).url, 'http://example.com/404')
+  t.is(rewriter.rewrite(req, docroot).url, 'http://example.com/404')
 })
 
 test('condition groups - AND', (t) => {
@@ -199,7 +197,7 @@ test('header rewriting', (t) => {
 test('href rewriting', (t) => {
   const rewriter = new Rewriter([{
     rewriters: [
-      { type: 'href', args: [ '^http://example.com(.*)$', '/index.php?route=${1}' ] }
+      { type: 'href', args: [ '^(.*)$', '/index.php?route=$1' ] }
     ]
   }])
 

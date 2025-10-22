@@ -303,8 +303,6 @@ pub extern "C" fn sapi_module_read_post(buffer: *mut c_char, length: usize) -> u
     return 0;
   }
 
-  // Fixed body reading bug from FIXME.md #2
-  // Now we properly consume from the mutable body instead of cloning
   RequestContext::current()
     .map(|ctx| {
       let body = ctx.request_body_mut();
