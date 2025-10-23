@@ -189,7 +189,6 @@ impl Embed {
   }
 }
 
-#[async_trait::async_trait]
 impl Handler for Embed {
   type Error = EmbedRequestError;
 
