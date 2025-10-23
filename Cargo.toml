@@ -1,6 +1,6 @@
 [package]
 edition = "2021"
-name = "php-node"
+name = "php"
 version = "1.4.0"
 authors = ["Platformatic Inc. <oss@platformatic.dev> (https://platformatic.dev)"]
 license = "MIT"
@@ -11,7 +11,7 @@ default = []
 napi-support = ["dep:napi", "dep:napi-derive", "dep:napi-build", "http-handler/napi-support", "http-rewriter/napi-support"]
 
 [lib]
-name = "php_node"
+name = "php"
 crate-type = ["cdylib", "rlib"]
 path = "src/lib.rs"
 
@@ -26,7 +26,7 @@ hostname = "0.4.1"
 ext-php-rs = { version = "0.14.0", features = ["embed"] }
 http-handler = { git = "https://github.com/platformatic/http-handler.git" }
 # http-handler = { path = "../http-handler" }
-http-rewriter = { git = "https://github.com/platformatic/http-rewriter.git", branch = "add-docroot-parameter-support" }
+http-rewriter = { git = "https://github.com/platformatic/http-rewriter.git" }
 # http-rewriter = { path = "../http-rewriter" }
 libc = "0.2.171"
 # Default enable napi4 feature, see https://nodejs.org/api/n-api.html#node-api-version-matrix

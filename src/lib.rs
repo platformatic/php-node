@@ -8,8 +8,8 @@
 //! ```rust
 //! use std::env::{args, current_dir};
 //! # use std::path::PathBuf;
-//! # use php_node::MockRoot;
-//! use php_node::{
+//! # use php::MockRoot;
+//! use php::{
 //!   rewrite::{PathRewriter, Rewriter},
 //!   Embed, Handler, Request,
 //! };

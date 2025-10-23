@@ -1,7 +1,7 @@
 use std::{env::current_dir, fs::File, io::Write, path::PathBuf};
 
 use bytes::BytesMut;
-use php_node::{rewrite::PathRewriter, Embed, Handler, Request, RequestRewriter};
+use php::{rewrite::PathRewriter, Embed, Handler, Request, RequestRewriter};
 
 #[tokio::main]
 async fn main() {

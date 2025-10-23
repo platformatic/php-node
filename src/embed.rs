@@ -12,7 +12,7 @@ use ext_php_rs::{
   zend::{try_catch, try_catch_first, ExecutorGlobals, SapiGlobals},
 };
 
-use http_handler::{Handler, Request, Response};
+use http_handler::{Handler, Request, Response, ResponseBuilderExt};
 
 use super::{
   sapi::{ensure_sapi, Sapi},
@@ -90,7 +90,7 @@ impl Embed {
   ///
   /// ```
   /// use std::env::current_dir;
-  /// use php_node::Embed;
+  /// use php::Embed;
   ///
   /// let docroot = current_dir()
   ///   .expect("should have current_dir");
@@ -113,7 +113,7 @@ impl Embed {
   ///
   /// ```
   /// use std::env::{args, current_dir};
-  /// use php_node::Embed;
+  /// use php::Embed;
   ///
   /// let docroot = current_dir()
   ///   .expect("should have current_dir");
@@ -137,7 +137,7 @@ impl Embed {
   ///
   /// ```
   /// use std::env::current_dir;
-  /// use php_node::{Embed, Handler, Request, Response};
+  /// use php::{Embed, Handler, Request, Response};
   ///
   /// let docroot = current_dir()
   ///   .expect("should have current_dir");
@@ -174,7 +174,7 @@ impl Embed {
   ///
   /// ```rust
   /// use std::env::current_dir;
-  /// use php_node::Embed;
+  /// use php::Embed;
   ///
   /// let docroot = current_dir()
   ///   .expect("should have current_dir");
@@ -199,7 +199,7 @@ impl Handler for Embed {
   ///
   /// ```
   /// use std::{env::temp_dir, fs::File, io::Write};
-  /// use php_node::{Embed, Handler, Request, Response, MockRoot};
+  /// use php::{Embed, Handler, Request, Response, MockRoot};
   ///
   /// let docroot = MockRoot::builder()
   ///   .file("index.php", "<?php echo \"Hello, World!\"; ?>")
@@ -321,10 +321,13 @@ impl Handler for Embed {
 
         let ex = Error::Exception(err);
 
-        // Fixed exception handling (FIXME.md #3) by using ResponseExt::set_exception
         if let Some(ctx) = RequestContext::current() {
-          ctx.set_response_exception(ex.to_string());
-          ctx.set_response_status(500);
+          let builder = std::mem::replace(
+            ctx.response_builder_mut(),
+            http_handler::response::Builder::new(),
+          );
+          let builder = builder.exception(ex.to_string()).status(500);
+          *ctx.response_builder_mut() = builder;
         }
 
         return Err(EmbedRequestError::Exception(ex.to_string()));
@@ -351,10 +354,16 @@ impl Handler for Embed {
         efree(mimetype.cast::<u8>());
       }
 
-      // Set the final status and content-type header using the new clean API (FIXME.md #4)
+      // Set the final status and content-type header
       if let Some(ctx) = RequestContext::current() {
-        ctx.set_response_status(http_response_code as u16);
-        ctx.add_response_header("Content-Type", mime);
+        let builder = std::mem::replace(
+          ctx.response_builder_mut(),
+          http_handler::response::Builder::new(),
+        );
+        let builder = builder
+          .status(http_response_code as u16)
+          .header("Content-Type", mime);
+        *ctx.response_builder_mut() = builder;
       }
 
       // Build the final response with accumulated data using the extension system

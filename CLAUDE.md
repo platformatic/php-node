@@ -37,17 +37,21 @@ npm run version
 # Build with proper rpath for linking libphp
 RUSTFLAGS="-C link-args=-Wl,-rpath,\$ORIGIN" npm run build
 
-# Build specific crate
-cargo build --manifest-path crates/php_node/Cargo.toml --release
+# Run Rust tests
+cargo test
+
+# Run binary directly
+cargo run
 ```
 
 ## Architecture
 
 ### Multi-language Structure
-- **Rust** (`/crates`): Core implementation using Cargo workspace
-  - `lang_handler`: Generic language handler abstractions
-  - `php`: PHP embedding and SAPI implementation  
-  - `php_node`: NAPI bindings exposing Rust to Node.js
+- **Rust** (`/src`): Single-crate implementation
+  - PHP embedding and SAPI implementation
+  - NAPI bindings exposing Rust to Node.js (when `napi-support` feature is enabled)
+  - Binary target for standalone testing (`src/main.rs`)
+  - Library target for NAPI usage (`src/lib.rs`)
 - **JavaScript**: Node.js API layer (`index.js`, `index.d.ts`)
 - **PHP**: Embedded runtime via libphp.{so,dylib}
 
@@ -87,21 +91,22 @@ cargo build --manifest-path crates/php_node/Cargo.toml --release
 
 5. **Platform Support**: x64 Linux, x64/arm64 macOS (pre-built binaries in `/npm`)
 
-6. **Recent Architecture Changes**: 
-   - `lang_handler` crate no longer uses `napi` features directly (removed from dependencies)
-   - `php` crate uses custom fork of ext-php-rs from platformatic GitHub org
+6. **Recent Architecture Changes**:
+   - Consolidated from multi-crate workspace to single crate named `php`
+   - NAPI support is now feature-gated with `napi-support` feature
+   - Binary target supports both library (`rlib`) and dynamic library (`cdylib`) outputs
 
 ## Common Tasks
 
 ### Adding New NAPI Functions
-1. Implement in Rust under `crates/php_node/src/`
+1. Implement in Rust under `src/` with `#[cfg(feature = "napi-support")]`
 2. Use `#[napi]` attributes for exposed functions/classes
 3. Run `npm run build` to regenerate TypeScript definitions
 
 ### Modifying Request/Response Handling
-- Core logic in `crates/php/src/sapi.rs`
+- Core logic in `src/sapi.rs` and `src/embed.rs`
 - JavaScript wrapper in `index.js`
-- Headers handling in `crates/php_node/src/headers.rs`
+- Request/response types from `http-handler` crate
 
 ### Debugging PHP Issues
 - Check INTERNALS.md for PHP embedding details
@@ -118,7 +123,9 @@ The rewriter system supports Apache mod_rewrite-like functionality:
 ## Project Files Reference
 
 - `index.js`: Main JavaScript API, exports PHP, Request, Response, Headers, Rewriter classes
-- `crates/php_node/src/lib.rs`: NAPI bindings entry point
-- `crates/php/src/sapi.rs`: PHP SAPI implementation (core request handling)
-- `crates/lang_handler/src/`: Generic language handler abstractions (request/response/rewriter)
+- `src/lib.rs`: Library entry point, exports core types and NAPI bindings
+- `src/main.rs`: Binary entry point for standalone testing
+- `src/embed.rs`: Core `Embed` type for handling PHP requests
+- `src/sapi.rs`: PHP SAPI implementation (low-level PHP integration)
+- `src/runtime.rs`: NAPI runtime implementation (when `napi-support` feature enabled)
 - `__test__/*.spec.mjs`: Test files for each component

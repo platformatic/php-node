@@ -23,6 +23,7 @@ use ext_php_rs::{
 use once_cell::sync::OnceCell;
 
 use crate::{EmbedRequestError, EmbedStartError, RequestContext};
+use http_handler::ResponseBuilderExt;
 
 // This is a helper to ensure that PHP is initialized and deinitialized at the
 // appropriate times.
@@ -267,8 +268,7 @@ pub extern "C" fn sapi_module_ub_write(str: *const c_char, str_length: usize) ->
 
   let len = bytes.len();
   if let Some(ctx) = RequestContext::current() {
-    // Use new method name for clarity (FIXME.md #4)
-    ctx.write_response_body(bytes);
+    ctx.response_builder_mut().append_body(bytes);
   }
   len
 }
@@ -291,8 +291,12 @@ pub extern "C" fn sapi_module_send_header(header: *mut SapiHeader, _server_conte
   // Header value is None for http version + status line
   if let Some(value) = header.value() {
     if let Some(ctx) = RequestContext::current() {
-      // Use new method that doesn't require mem::replace hacks (FIXME.md #4)
-      ctx.add_response_header(name, value);
+      let builder = std::mem::replace(
+        ctx.response_builder_mut(),
+        http_handler::response::Builder::new(),
+      );
+      let builder = builder.header(name, value);
+      *ctx.response_builder_mut() = builder;
     }
   }
 }
@@ -305,7 +309,7 @@ pub extern "C" fn sapi_module_read_post(buffer: *mut c_char, length: usize) -> u
 
   RequestContext::current()
     .map(|ctx| {
-      let body = ctx.request_body_mut();
+      let body = ctx.request_mut().body_mut();
       let actual_length = length.min(body.len());
       if actual_length == 0 {
         return 0;
@@ -325,7 +329,7 @@ pub extern "C" fn sapi_module_read_post(buffer: *mut c_char, length: usize) -> u
 #[no_mangle]
 pub extern "C" fn sapi_module_read_cookies() -> *mut c_char {
   RequestContext::current()
-    .map(|ctx| match ctx.request_parts().headers.get("Cookie") {
+    .map(|ctx| match ctx.request().headers().get("Cookie") {
       Some(cookie) => estrdup(cookie.to_str().unwrap_or("")),
       None => std::ptr::null_mut(),
     })
@@ -373,8 +377,9 @@ pub extern "C" fn sapi_module_register_server_variables(vars: *mut ext_php_rs::t
   // }
 
   if let Some(ctx) = RequestContext::current() {
-    let request_parts = ctx.request_parts();
-    let headers = &request_parts.headers;
+    let request = ctx.request();
+    let headers = request.headers();
+    let uri = request.uri();
 
     // Hack to allow ? syntax for the following code.
     // At the moment any errors are just swallowed, but these could be
@@ -401,21 +406,17 @@ pub extern "C" fn sapi_module_register_server_variables(vars: *mut ext_php_rs::t
           std::ptr::null_mut()
         };
 
-        env_var(
-          vars,
-          "REQUEST_SCHEME",
-          request_parts.uri.scheme_str().unwrap_or("http"),
-        )?;
+        env_var(vars, "REQUEST_SCHEME", uri.scheme_str().unwrap_or("http"))?;
         env_var(vars, "CONTEXT_PREFIX", "")?;
         env_var(vars, "SERVER_ADMIN", "webmaster@localhost")?;
         env_var(vars, "GATEWAY_INTERFACE", "CGI/1.1")?;
 
         // Laravel seems to think "/register" should be "/index.php/register"?
         // env_var_c(vars, "PHP_SELF", script_name as *mut c_char)?;
-        env_var(vars, "PHP_SELF", request_parts.uri.path())?;
+        env_var(vars, "PHP_SELF", uri.path())?;
 
         // TODO: is "/register", should be "/index.php"
-        env_var(vars, "SCRIPT_NAME", request_parts.uri.path())?;
+        env_var(vars, "SCRIPT_NAME", uri.path())?;
         // env_var_c(vars, "SCRIPT_NAME", script_name as *mut c_char)?;
         env_var_c(vars, "PATH_INFO", script_name as *mut c_char)?;
         env_var_c(vars, "SCRIPT_FILENAME", script_filename)?;
@@ -440,7 +441,7 @@ pub extern "C" fn sapi_module_register_server_variables(vars: *mut ext_php_rs::t
           env_var_c(vars, "SERVER_SOFTWARE", inner_sapi.name)?;
         }
 
-        if let Some(socket_info) = request_parts.extensions.get::<http_handler::SocketInfo>() {
+        if let Some(socket_info) = request.extensions().get::<http_handler::SocketInfo>() {
           if let Some(local) = socket_info.local {
             env_var(vars, "SERVER_ADDR", local.ip().to_string())?;
             env_var(vars, "SERVER_PORT", local.port().to_string())?;
@@ -473,8 +474,7 @@ pub extern "C" fn sapi_module_register_server_variables(vars: *mut ext_php_rs::t
 pub extern "C" fn sapi_module_log_message(message: *const c_char, _syslog_type_int: c_int) {
   let message = unsafe { CStr::from_ptr(message) };
   if let Some(ctx) = RequestContext::current() {
-    // Use new method that uses extension system (FIXME.md #4)
-    ctx.write_response_log(message.to_bytes());
+    ctx.response_builder_mut().append_log(message.to_bytes());
   }
 }
 
@@ -486,11 +486,11 @@ pub extern "C" fn sapi_module_log_message(message: *const c_char, _syslog_type_i
 pub fn apache_request_headers() -> Result<HashMap<String, String>, String> {
   let mut headers = HashMap::new();
 
-  let request_parts = RequestContext::current()
-    .map(|ctx| ctx.request_parts())
+  let request = RequestContext::current()
+    .map(|ctx| ctx.request())
     .ok_or("Request context unavailable")?;
 
-  for (key, value) in request_parts.headers.iter() {
+  for (key, value) in request.headers().iter() {
     headers.insert(key.to_string(), value.to_str().unwrap_or("").to_string());
   }
 
