@@ -30,8 +30,8 @@
     "node": ">= 10"
   },
   "scripts": {
-    "build": "napi build --manifest-path ./crates/php_node/Cargo.toml --platform --no-js --output-dir . --release",
-    "build:debug": "napi build --manifest-path ./crates/php_node/Cargo.toml --platform --no-js --output-dir .",
+    "build": "napi build --platform --no-js --output-dir . --release --features napi-support -- --lib",
+    "build:debug": "napi build --platform --no-js --output-dir . --features napi-support -- --lib",
     "lint": "oxlint",
     "test": "ava __test__/**.spec.mjs",
     "universal": "napi universal",

@@ -3,11 +3,12 @@ import test from 'ava'
 import { Request, Rewriter } from '../index.js'
 
 const docroot = import.meta.dirname
+const filename = import.meta.filename.replace(docroot, '')
 
 test('existence condition', (t) => {
   const req = new Request({
     method: 'GET',
-    url: 'http://example.com/util.mjs',
+    url: `http://example.com${filename}`,
     headers: {
       TEST: ['foo']
     }
@@ -16,7 +17,7 @@ test('existence condition', (t) => {
   const rewriter = new Rewriter([
     {
       conditions: [
-        { type: 'exists' }
+        { type: 'exists', args: [] }
       ],
       rewriters: [
         {
@@ -196,7 +197,7 @@ test('header rewriting', (t) => {
 test('href rewriting', (t) => {
   const rewriter = new Rewriter([{
     rewriters: [
-      { type: 'href', args: [ '^(.*)$', '/index.php?route=${1}' ] }
+      { type: 'href', args: [ '^(.*)$', '/index.php?route=$1' ] }
     ]
   }])
 
@@ -213,7 +214,7 @@ test('href rewriting', (t) => {
 test('method rewriting', (t) => {
   const rewriter = new Rewriter([{
     rewriters: [
-      { type: 'method', args: ['GET', 'POST'] }
+      { type: 'method', args: ['POST'] }
     ]
   }])
 

@@ -1,34 +1,36 @@
 use std::{env::current_dir, fs::File, io::Write, path::PathBuf};
 
-use php::{
-  rewrite::{PathRewriter, Rewriter},
-  Embed, Handler, Request,
-};
+use bytes::BytesMut;
+use php::{rewrite::PathRewriter, Embed, Handler, Request, RequestRewriter};
 
-pub fn main() {
-  let _temp_file = TempFile::new("index.php", "<?php echo \"Hello, world!\" ?>");
+#[tokio::main]
+async fn main() {
+  let _temp_file = TempFile::new("index.php", "<?php echo \"Hello, world!\"; ?>");
 
   let docroot = current_dir().expect("should have current_dir");
 
   let rewriter = PathRewriter::new("test", "index").expect("should be valid regex");
 
-  let maybe_rewriter: Option<Box<dyn Rewriter>> = Some(rewriter);
+  let maybe_rewriter: Option<Box<dyn RequestRewriter>> = Some(Box::new(rewriter));
   let embed = Embed::new_with_args(docroot, maybe_rewriter, std::env::args())
     .expect("should construct embed");
 
-  let request = Request::builder()
-    .method("POST")
-    .url("http://example.com/test.php")
-    .header("Content-Type", "text/html")
-    .header("Content-Length", 13.to_string())
-    .body("Hello, World!")
-    .build()
-    .expect("should build request");
+  // Build request using the re-exported Request type from http crate
+  let mut request = Request::new(BytesMut::from("Hello, World!"));
+  *request.method_mut() = "POST".parse().unwrap();
+  *request.uri_mut() = "http://example.com/test.php".parse().unwrap();
+  request
+    .headers_mut()
+    .insert("Content-Type", "text/html".parse().unwrap());
+  request
+    .headers_mut()
+    .insert("Content-Length", "13".parse().unwrap());
 
   println!("request: {:#?}", request);
 
   let response = embed
     .handle(request.clone())
+    .await
     .expect("should handle request");
 
   println!("response: {:#?}", response);
