@@ -73,6 +73,9 @@ pub enum EmbedRequestError {
 
   /// Error during request rewriting
   RequestRewriteError(String),
+
+  /// Error handling request body stream
+  RequestBodyError(String),
 }
 
 impl std::fmt::Display for EmbedRequestError {
@@ -107,6 +110,9 @@ impl std::fmt::Display for EmbedRequestError {
       }
       EmbedRequestError::RequestRewriteError(e) => {
         write!(f, "Request rewrite error: {}", e)
+      }
+      EmbedRequestError::RequestBodyError(e) => {
+        write!(f, "Request body error: {}", e)
       }
     }
   }

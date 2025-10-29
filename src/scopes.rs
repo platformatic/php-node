@@ -6,6 +6,7 @@ use std::{
 
 use ext_php_rs::{
   alloc::{efree, estrdup},
+  embed::{ext_php_rs_sapi_per_thread_init, ext_php_rs_sapi_per_thread_shutdown},
   ffi::{
     _zend_file_handle__bindgen_ty_1, php_request_shutdown, php_request_startup,
     zend_destroy_file_handle, zend_file_handle, zend_stream_init_filename,
@@ -14,6 +15,25 @@ use ext_php_rs::{
 };
 
 use super::EmbedRequestError;
+
+pub(crate) struct ThreadScope();
+
+impl ThreadScope {
+  pub fn new() -> Self {
+    unsafe {
+      ext_php_rs_sapi_per_thread_init();
+    }
+    Self()
+  }
+}
+
+impl Drop for ThreadScope {
+  fn drop(&mut self) {
+    unsafe {
+      ext_php_rs_sapi_per_thread_shutdown();
+    }
+  }
+}
 
 /// A scope in which php request activity may occur. This is responsible for
 /// starting up and shutting down the php request and cleaning up associated
@@ -46,6 +66,7 @@ impl FileHandleScope {
   where
     P: AsRef<Path>,
   {
+    let path_str = path.as_ref().to_str().unwrap();
     let mut handle = zend_file_handle {
       handle: _zend_file_handle__bindgen_ty_1 {
         fp: std::ptr::null_mut(),
@@ -59,7 +80,7 @@ impl FileHandleScope {
       len: 0,
     };
 
-    let path = estrdup(path.as_ref().to_str().unwrap());
+    let path = estrdup(path_str);
 
     unsafe {
       zend_stream_init_filename(&mut handle, path);

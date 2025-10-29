@@ -10,8 +10,6 @@ test('minimum construction requirements', (t) => {
 
   t.is(req.method, 'GET')
   t.is(req.url, 'http://example.com/test.php')
-  t.assert(req.body instanceof Buffer)
-  t.is(req.body.length, 0)
   t.assert(req.headers instanceof Headers)
   t.is(req.headers.size, 0)
 })

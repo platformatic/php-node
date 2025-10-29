@@ -1,25 +1,52 @@
 use std::{
   env::Args,
+  ffi::c_char,
   ops::DerefMut,
   path::{Path, PathBuf},
   sync::Arc,
 };
 
 use ext_php_rs::{
-  alloc::{efree, estrdup},
+  alloc::estrdup,
   error::Error,
-  ffi::{php_execute_script, sapi_get_default_content_type},
+  ffi::php_execute_script,
   zend::{try_catch, try_catch_first, ExecutorGlobals, SapiGlobals},
 };
 
-use http_handler::{Handler, Request, Response, ResponseBuilderExt};
+use http_handler::types::{Request, Response};
+use http_handler::Handler;
 
 use super::{
   sapi::{ensure_sapi, Sapi},
-  scopes::{FileHandleScope, RequestScope},
+  scopes::{FileHandleScope, RequestScope, ThreadScope},
   strings::translate_path,
   EmbedRequestError, EmbedStartError, RequestContext,
 };
+
+/// Extension type to keep the blocking PHP task alive while the response is being consumed
+#[derive(Clone)]
+pub struct BlockingTaskHandle(
+  Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<Result<(), EmbedRequestError>>>>>,
+);
+
+impl Drop for BlockingTaskHandle {
+  fn drop(&mut self) {
+    // Only wait if this is the last reference
+    if Arc::strong_count(&self.0) == 1 {
+      // CRITICAL: We must wait for the blocking task to complete, not abort it.
+      // The blocking task contains ThreadScope which must call ext_php_rs_sapi_per_thread_shutdown()
+      // to properly clean up PHP's thread-local storage. If we abort, the cleanup never happens
+      // and PHP's TSRM can be left in an inconsistent state, causing memory corruption.
+      if let Ok(mut guard) = self.0.try_lock() {
+        if let Some(handle) = guard.take() {
+          // Use block_on to wait for the task to complete
+          // This ensures ThreadScope::drop() runs and PHP TLS is cleaned up
+          let _ = crate::sapi::fallback_handle().block_on(handle);
+        }
+      }
+    }
+  }
+}
 
 /// A simple trait for rewriting requests that works with our specific request type
 pub trait RequestRewriter: Send + Sync {
@@ -192,7 +219,10 @@ impl Embed {
 impl Handler for Embed {
   type Error = EmbedRequestError;
 
-  /// Handles an HTTP request.
+  /// Handles an HTTP request with streaming response.
+  ///
+  /// Returns immediately after headers are sent, with body chunks streaming asynchronously.
+  /// Buffering is handled externally by NAPI Task compute() methods when needed.
   ///
   /// # Examples
   ///
@@ -208,83 +238,155 @@ impl Handler for Embed {
   /// let handler = Embed::new(docroot.clone(), None)
   ///   .expect("should construct Embed");
   ///
+  /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
+  /// let body = http_handler::RequestBody::new();
+  ///
+  /// // Close the request body stream - callers must always shutdown the stream before calling handle()
+  /// {
+  ///   use tokio::io::AsyncWriteExt;
+  ///   let mut body_writer = body.clone();
+  ///   body_writer.shutdown().await.expect("should close request body stream");
+  /// }
+  ///
   /// let request = http_handler::request::Request::builder()
   ///   .method("GET")
-  ///   .uri("http://example.com")
-  ///   .body(bytes::BytesMut::new())
+  ///   .uri("http://example.com/index.php")
+  ///   .body(body)
   ///   .expect("should build request");
   ///
-  /// # tokio_test::block_on(async {
   /// let response = handler.handle(request)
   ///   .await
   ///   .expect("should handle request");
-  /// # });
   ///
-  /// //assert_eq!(response.status(), 200);
-  /// //assert_eq!(response.body(), "Hello, world!");
+  /// // Consume the streaming response body to ensure PHP task completes
+  /// use http_body_util::BodyExt;
+  /// let (_parts, body) = response.into_parts();
+  /// let mut stream = body;
+  /// while let Some(frame_result) = stream.frame().await {
+  ///   match frame_result {
+  ///     Ok(_) => continue,
+  ///     Err(e) => panic!("Error reading response: {}", e),
+  ///   }
+  /// }
+  ///
+  /// drop(handler);
+  /// # });
   /// ```
+  /// Handle a PHP request with streaming response.
+  ///
+  /// Returns immediately after headers are sent, with body chunks streaming asynchronously.
+  /// All buffering is external to this method, handled by NAPI Task compute() methods.
   async fn handle(&self, request: Request) -> Result<Response, Self::Error> {
-    let docroot = self.docroot.clone();
-
-    // Initialize the SAPI module
-    self.sapi.startup()?;
+    use tokio::sync::oneshot;
 
     // Get REQUEST_URI _first_ as it needs the pre-rewrite state.
-    let url = request.uri();
-    let request_uri = url.path();
+    let uri = request.uri().clone();
+    let request_uri_str = uri.path().to_string();
 
     // Apply request rewriting rules
-    let mut request = request.clone();
-    if let Some(rewriter) = &self.rewriter {
-      request = rewriter
+    let request = if let Some(rewriter) = &self.rewriter {
+      rewriter
         .rewrite_request(request, &self.docroot)
-        .map_err(|e| EmbedRequestError::RequestRewriteError(e.to_string()))?;
-    }
+        .map_err(|e| EmbedRequestError::RequestRewriteError(e.to_string()))?
+    } else {
+      request
+    };
 
-    let translated_path = translate_path(&docroot, request.uri().path())?
+    // Clone headers as owned HashMap
+    let headers_map: std::collections::HashMap<String, String> = request
+      .headers()
+      .iter()
+      .filter_map(|(k, v)| {
+        v.to_str()
+          .ok()
+          .map(|val| (k.as_str().to_string(), val.to_string()))
+      })
+      .collect();
+
+    // Translate path on async thread
+    let docroot = self.docroot.clone();
+    let translated_path_str = translate_path(&docroot, request.uri().path())?
       .display()
       .to_string();
 
-    // Convert REQUEST_URI and PATH_TRANSLATED to C strings
-    let request_uri = estrdup(request_uri);
-    let path_translated = estrdup(translated_path.clone());
-
     // Extract request method, query string, and headers
-    let request_method = estrdup(request.method().as_str());
-    let query_string = estrdup(url.query().unwrap_or(""));
+    let method_str = request.method().as_str().to_string();
+    let query_str = uri.query().unwrap_or("").to_string();
 
-    let headers = request.headers();
-    let content_type = headers
-      .get("Content-Type")
-      .and_then(|v| v.to_str().ok())
-      .map(estrdup)
-      .unwrap_or(std::ptr::null_mut());
-    let content_length = headers
-      .get("Content-Length")
-      .and_then(|v| v.to_str().ok())
+    // Extract content-type and content-length as owned strings before spawn_blocking
+    let content_type_str = headers_map
+      .get("content-type")
+      .or_else(|| headers_map.get("Content-Type"))
+      .cloned();
+
+    let content_length = headers_map
+      .get("content-length")
+      .or_else(|| headers_map.get("Content-Length"))
       .and_then(|s| s.parse::<i64>().ok())
-      .unwrap_or(0);
+      .unwrap_or(-1); // -1 means unknown length for streaming requests
 
-    // Prepare argv and argc
-    let argc = self.args.len() as i32;
-    let mut argv_ptrs = vec![];
-    for arg in self.args.iter() {
-      argv_ptrs.push(estrdup(arg.to_owned()));
-    }
+    // Clone args as owned Strings to send to blocking thread
+    let args: Vec<String> = self.args.iter().map(|s| s.to_string()).collect();
 
-    let script_name = translated_path.clone();
+    // Create streaming response body
+    let response_body = request.body().create_response();
+    let response_writer = response_body.clone();
 
-    // Fixed RefUnwindSafe issue (FIXME.md #1) by setting up RequestContext before try_catch_first
-    // This avoids the need to rebuild the request inside the closure
-    RequestContext::for_request(request, docroot.clone());
+    // Channel to receive headers + status + custom headers + logs when ready (send owned data)
+    let (headers_sent_tx, headers_sent_rx) =
+      oneshot::channel::<(u16, String, Vec<(String, String)>, bytes::Bytes)>();
 
-    let response = try_catch_first(move || {
-      // Set server context
+    // CRITICAL: Clone Arc<Sapi> to keep it alive while the blocking task runs.
+    // If Embed is dropped before the blocking task completes, we need to prevent
+    // Sapi::drop() from calling tsrm_shutdown() while PHP operations are in progress.
+    let sapi = self.sapi.clone();
+
+    // Spawn blocking PHP execution - ALL PHP operations happen here
+    let blocking_handle = tokio::task::spawn_blocking(move || {
+      // Keep sapi alive for the duration of the blocking task
+      let _sapi = sapi;
+
+      // Initialize thread-local storage for this worker thread.
+      // This calls ext_php_rs_sapi_per_thread_init() -> ts_resource(0) which sets up
+      // PHP's thread-local storage for the current thread.
+      //
+      // NOTE: php_module_startup() is called ONCE on the main thread when Sapi is created.
+      // Worker threads only need per-thread TLS initialization via ThreadScope, NOT
+      // another php_module_startup call. Calling php_module_startup from multiple threads
+      // concurrently corrupts global state (memory allocator function pointers).
+      let _thread_scope = ThreadScope::new();
+
+      // Setup RequestContext (always streaming from SAPI perspective)
+      // RequestContext::new() will extract the request body's read stream and add it as RequestStream extension
+      let ctx = RequestContext::new(
+        request,
+        docroot.clone(),
+        response_writer.clone(),
+        headers_sent_tx,
+      );
+      RequestContext::set_current(Box::new(ctx));
+
+      // All estrdup calls happen here, inside spawn_blocking, after ThreadScope::new()
+      // has initialized PHP's thread-local storage. These will be freed by efree in
+      // sapi_module_deactivate during request shutdown.
+      let request_uri_c = estrdup(request_uri_str);
+      let path_translated = estrdup(translated_path_str.clone());
+      let request_method = estrdup(method_str);
+      let query_string = estrdup(query_str);
+      let content_type = content_type_str
+        .map(estrdup)
+        .unwrap_or(std::ptr::null_mut());
+
+      // Prepare argv pointers
+      let argc = args.len() as i32;
+      let mut argv_ptrs: Vec<*mut c_char> = args.iter().map(|s| estrdup(s.as_str())).collect();
+
+      // Set SAPI globals BEFORE php_request_startup since PHP reads these during initialization
       {
         let mut globals = SapiGlobals::get_mut();
-        globals.options |= ext_php_rs::ffi::SAPI_OPTION_NO_CHDIR as i32;
 
         // Reset state
+        globals.options |= ext_php_rs::ffi::SAPI_OPTION_NO_CHDIR as i32;
         globals.request_info.proto_num = 110;
         globals.request_info.argc = argc;
         globals.request_info.argv = argv_ptrs.as_mut_ptr();
@@ -295,7 +397,7 @@ impl Handler for Embed {
         globals.request_info.request_method = request_method;
         globals.request_info.query_string = query_string;
         globals.request_info.path_translated = path_translated;
-        globals.request_info.request_uri = request_uri;
+        globals.request_info.request_uri = request_uri_c;
 
         // TODO: Add auth fields
 
@@ -303,75 +405,74 @@ impl Handler for Embed {
         globals.request_info.content_length = content_length;
       }
 
-      let _request_scope = RequestScope::new()?;
+      let result = try_catch_first(|| {
+        let _request_scope = RequestScope::new()?;
 
-      // Run script in its own try/catch so bailout doesn't skip request shutdown.
-      {
-        let mut file_handle = FileHandleScope::new(script_name.clone());
-        try_catch(|| unsafe { php_execute_script(file_handle.deref_mut()) })
-          .map_err(|_| EmbedRequestError::Bailout)?;
-      }
-
-      if let Some(err) = ExecutorGlobals::take_exception() {
+        // Execute PHP script
         {
-          let mut globals = SapiGlobals::get_mut();
-          globals.sapi_headers.http_response_code = 500;
+          let mut file_handle = FileHandleScope::new(translated_path_str.clone());
+          try_catch(|| unsafe { php_execute_script(file_handle.deref_mut()) })
+            .map_err(|_| EmbedRequestError::Bailout)?;
         }
 
-        let ex = Error::Exception(err);
-
-        if let Some(ctx) = RequestContext::current() {
-          let builder = std::mem::replace(
-            ctx.response_builder_mut(),
-            http_handler::response::Builder::new(),
-          );
-          let builder = builder.exception(ex.to_string()).status(500);
-          *ctx.response_builder_mut() = builder;
+        // Handle exceptions
+        if let Some(err) = ExecutorGlobals::take_exception() {
+          let ex = Error::Exception(err);
+          return Err(EmbedRequestError::Exception(ex.to_string()));
         }
 
-        return Err(EmbedRequestError::Exception(ex.to_string()));
-      };
+        Ok(())
+        // RequestScope drops here, triggering request shutdown
+        // Output buffering flush happens during shutdown, calling ub_write
+        // RequestContext must still be alive at this point!
+      });
 
-      let (mut mimetype, http_response_code) = {
-        let h = SapiGlobals::get().sapi_headers;
-        (h.mimetype, h.http_response_code)
-      };
+      // Reclaim RequestContext AFTER RequestScope has dropped
+      // This ensures output buffer flush during shutdown can still access the context
+      // Note: reclaim() also shuts down the response stream to signal EOF to consumers
+      let _ctx = RequestContext::reclaim();
 
-      if mimetype.is_null() {
-        mimetype = unsafe { sapi_get_default_content_type() };
+      // Flatten the result
+      match result {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(e)) => Err(e),
+        Err(_) => Err(EmbedRequestError::Bailout),
       }
+    });
 
-      let mime_ptr =
-        unsafe { mimetype.as_ref() }.ok_or(EmbedRequestError::FailedToDetermineContentType)?;
+    // Wait for headers to be sent (with owned status, mimetype, custom headers, and logs)
+    // The JavaScript code should call req.end() concurrently using Promise.all to avoid deadlock
+    let (status, mime_str, custom_headers, logs) = headers_sent_rx
+      .await
+      .map_err(|_| EmbedRequestError::ResponseBuildError)?;
 
-      let mime = unsafe { std::ffi::CStr::from_ptr(mime_ptr) }
-        .to_str()
-        .map_err(|_| EmbedRequestError::FailedToDetermineContentType)?
-        .to_owned();
+    // Build response with headers and streaming body (on async thread, using owned data)
+    let mut builder = http_handler::response::Builder::new()
+      .status(status)
+      .header("Content-Type", mime_str);
 
-      unsafe {
-        efree(mimetype.cast::<u8>());
-      }
+    // Add custom headers from PHP header() calls
+    for (name, value) in custom_headers {
+      builder = builder.header(name, value);
+    }
 
-      // Set the final status and content-type header
-      if let Some(ctx) = RequestContext::current() {
-        let builder = std::mem::replace(
-          ctx.response_builder_mut(),
-          http_handler::response::Builder::new(),
-        );
-        let builder = builder
-          .status(http_response_code as u16)
-          .header("Content-Type", mime);
-        *ctx.response_builder_mut() = builder;
-      }
+    let mut response = builder
+      .body(response_body)
+      .map_err(|_| EmbedRequestError::ResponseBuildError)?;
 
-      // Build the final response with accumulated data using the extension system
-      RequestContext::reclaim()
-        .ok_or(EmbedRequestError::ResponseBuildError)?
-        .build_response()
-        .map_err(|_| EmbedRequestError::ResponseBuildError)
-    })
-    .unwrap_or(Err(EmbedRequestError::Bailout))?;
+    // Store logs in extensions for streaming mode (available but not streamed)
+    if !logs.is_empty() {
+      response
+        .extensions_mut()
+        .insert(http_handler::ResponseLog::from_bytes(logs));
+    }
+
+    // Store the blocking task handle to keep it alive while response is consumed
+    response
+      .extensions_mut()
+      .insert(BlockingTaskHandle(Arc::new(tokio::sync::Mutex::new(Some(
+        blocking_handle,
+      )))));
 
     Ok(response)
   }

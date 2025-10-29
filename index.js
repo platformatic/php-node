@@ -28,9 +28,12 @@ function getNativeBinding({ platform, arch }) {
     name += '-msvc'
   }
 
-  const path = process.env.PHP_NODE_TEST
-    ? `./php.${name}.node`
-    : `./npm/${name}/binding.node`
-
-  return require(path)
+  try {
+    return require(`./npm/${name}/binding.node`)
+  } catch (err) {
+    if (err.code === 'MODULE_NOT_FOUND') {
+      return require(`./php.${name}.node`)
+    }
+    throw err
+  }
 }

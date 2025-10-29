@@ -9,8 +9,6 @@ test('Minimal response construction', (t) => {
 
   t.is(res.status, 200)
   t.assert(res.headers instanceof Headers)
-  t.assert(res.body instanceof Buffer)
-  t.deepEqual(res.body.toString(), '')
   t.assert(res.log instanceof Buffer)
   t.deepEqual(res.log.toString(), '')
   t.is(res.exception, null)
@@ -37,8 +35,6 @@ test('Full Response construction', (t) => {
   t.assert(res.headers instanceof Headers)
   t.deepEqual(res.headers.get('Content-Type'), 'application/json')
   t.deepEqual(res.headers.getAll('Accept'), ['application/json', 'text/plain'])
-  t.assert(res.body instanceof Buffer)
-  t.deepEqual(res.body.toString(), json)
   t.assert(res.log instanceof Buffer)
   t.deepEqual(res.log.toString(), 'Hello, from error_log!')
   t.deepEqual(res.exception, 'Hello, from PHP!')

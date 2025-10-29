@@ -1,7 +1,6 @@
 use std::{env::current_dir, fs::File, io::Write, path::PathBuf};
 
-use bytes::BytesMut;
-use php::{rewrite::PathRewriter, Embed, Handler, Request, RequestRewriter};
+use php::{rewrite::PathRewriter, Embed, Handler, RequestRewriter};
 
 #[tokio::main]
 async fn main() {
@@ -15,16 +14,18 @@ async fn main() {
   let embed = Embed::new_with_args(docroot, maybe_rewriter, std::env::args())
     .expect("should construct embed");
 
-  // Build request using the re-exported Request type from http crate
-  let mut request = Request::new(BytesMut::from("Hello, World!"));
-  *request.method_mut() = "POST".parse().unwrap();
-  *request.uri_mut() = "http://example.com/test.php".parse().unwrap();
-  request
-    .headers_mut()
-    .insert("Content-Type", "text/html".parse().unwrap());
-  request
-    .headers_mut()
-    .insert("Content-Length", "13".parse().unwrap());
+  // Build request using RequestBody
+  let body = http_handler::RequestBody::from_data(bytes::Bytes::from("Hello, World!"))
+    .await
+    .expect("should create body");
+
+  let request = http_handler::request::Request::builder()
+    .method("POST")
+    .uri("http://example.com/test.php")
+    .header("Content-Type", "text/html")
+    .header("Content-Length", "13")
+    .body(body)
+    .expect("should build request");
 
   println!("request: {:#?}", request);
 

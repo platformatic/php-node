@@ -405,6 +405,8 @@ export declare class Request {
   /**
    * Get the body of the request as a Buffer.
    *
+   * Returns buffered data if the request was created with a body in the constructor.
+   *
    * # Examples
    *
    * ```js
@@ -418,25 +420,7 @@ export declare class Request {
    * console.log(request.body.toString()); // {"message":"Hello, world!"}
    * ```
    */
-  get body(): Buffer
-  /**
-   * Set the body of the request.
-   *
-   * # Examples
-   *
-   * ```js
-   * const request = new Request({
-   *  url: "/v2/api/thing"
-   * });
-   *
-   * request.body = Buffer.from(JSON.stringify({
-   *   message: 'Hello, world!'
-   * }));
-   *
-   * console.log(request.body.toString()); // {"message":"Hello, world!"}
-   * ```
-   */
-  set body(body: Buffer)
+  get body(): Buffer | null
   /**
    * Convert the response to a JSON object representation.
    *
@@ -458,6 +442,39 @@ export declare class Request {
    * ```
    */
   toJSON(): object
+  /**
+   * Write a chunk to the request body stream
+   *
+   * # Examples
+   *
+   * ```js
+   * const request = new Request({
+   *   method: "POST",
+   *   url: "/upload"
+   * });
+   *
+   * await request.write(Buffer.from('chunk 1'));
+   * await request.write('chunk 2');
+   * await request.end();
+   * ```
+   */
+  write(chunk: Buffer | string): Promise<void>
+  /**
+   * End the request body stream (HTTP mode only)
+   *
+   * # Examples
+   *
+   * ```js
+   * const request = new Request({
+   *   method: "POST",
+   *   url: "/upload"
+   * });
+   *
+   * await request.write(Buffer.from('data'));
+   * await request.end();
+   * ```
+   */
+  end(): Promise<void>
 }
 
 /**
@@ -576,37 +593,28 @@ export declare class Response {
    */
   set headers(headers: Headers)
   /**
-   * Get the body of the response as a Buffer.
+   * Get the buffered body of the response as a Buffer.
+   *
+   * Note: With the new streaming architecture, response bodies are not buffered by default.
+   * This getter returns buffered data if it was explicitly buffered (e.g., by handleRequest).
+   * For streaming responses, use the AsyncIterator protocol via next().
+   *
+   * Returns `undefined` for streaming responses without buffering.
    *
    * # Examples
    *
    * ```js
-   * const response = new Response({
-   *   body: Buffer.from(JSON.stringify({
-   *     message: 'Hello, world!'
-   *   }))
-   * });
+   * // After handleRequest (automatically buffered)
+   * const response = await python.handleRequest(request);
+   * console.log(response.body.toString()); // Works - body was buffered
    *
-   * console.log(response.body.toString()); // {"message":"Hello, world!"}
+   * // For streaming responses, use AsyncIterator
+   * for await (const chunk of response) {
+   *   console.log(chunk.toString());
+   * }
    * ```
    */
-  get body(): Buffer
-  /**
-   * Set the body of the response.
-   *
-   * # Examples
-   *
-   * ```js
-   * const response = new Response();
-   *
-   * response.body = Buffer.from(JSON.stringify({
-   *   message: 'Hello, world!'
-   * }));
-   *
-   * console.log(response.body.toString()); // {"message":"Hello, world!"}
-   * ```
-   */
-  set body(body: Buffer)
+  get body(): Buffer | null
   /**
    * Get the log of the response as a Buffer.
    *
@@ -655,6 +663,22 @@ export declare class Response {
    * ```
    */
   toJSON(): object
+  /**
+   * Read the next chunk from the response body stream
+   *
+   * Returns the next chunk as a Buffer, or undefined if the stream has ended.
+   * This method is used to implement AsyncIterator in JavaScript.
+   *
+   * For WebSocket responses (when WebSocketMode extension is present), this automatically
+   * decodes WebSocket frames and returns the payload data.
+   *
+   * # Examples
+   *
+   * ```js
+   * console.log(await response.next()); // Buffer | undefined
+   * ```
+   */
+  next(): Promise<Buffer | null>
 }
 
 /** A multi-map of HTTP headers. Any given header key can have multiple values. */
@@ -679,6 +703,8 @@ export interface RequestOptions {
   socket?: SocketInfo
   /** Document root for the request, if applicable. */
   docroot?: string
+  /** Whether this is a WebSocket request. */
+  websocket?: boolean
 }
 
 /** Input options for creating a Response. */
@@ -1387,6 +1413,35 @@ export declare class Php {
    * ```
    */
   handleRequestSync(request: PhpRequest): PhpResponse
+  /**
+   * Handle a streaming PHP request.
+   *
+   * Returns immediately after headers are sent, with body chunks streaming
+   * asynchronously. Use the AsyncIterator interface to read the response body.
+   *
+   * # Examples
+   *
+   * ```js
+   * const php = new Php({
+   *   docroot: process.cwd(),
+   *   argv: process.argv
+   * });
+   *
+   * const response = await php.handleStream(new Request({
+   *   method: 'GET',
+   *   url: 'http://example.com'
+   * }));
+   *
+   * console.log(response.status);   // Available immediately
+   * console.log(response.headers);  // Available immediately
+   *
+   * // Read streaming body
+   * for await (const chunk of response) {
+   *   console.log('Chunk:', chunk.toString());
+   * }
+   * ```
+   */
+  handleStream(request: PhpRequest, signal?: AbortSignal | undefined | null): Promise<unknown>
 }
 export type PhpRuntime = Php
 
