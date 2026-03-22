@@ -411,8 +411,10 @@ impl Handler for Embed {
         // Execute PHP script
         {
           let mut file_handle = FileHandleScope::new(translated_path_str.clone());
-          try_catch(|| unsafe { php_execute_script(file_handle.deref_mut()) })
-            .map_err(|_| EmbedRequestError::Bailout)?;
+          try_catch(std::panic::AssertUnwindSafe(|| unsafe {
+            php_execute_script(file_handle.deref_mut())
+          }))
+          .map_err(|_| EmbedRequestError::Bailout)?;
         }
 
         // Handle exceptions

@@ -208,7 +208,7 @@ test.skip('handleStream - exception handling', async (t) => {
   // Exception should be sent through the stream
   let errorOccurred = false
   try {
-    for await (const chunk of res) {
+    for await (const _chunk of res) {
       // Should not receive chunks, should throw
     }
   } catch (err) {

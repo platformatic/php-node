@@ -22,8 +22,7 @@ path = "src/main.rs"
 [dependencies]
 bytes = "1.10.1"
 hostname = "0.4.1"
-# TODO: Switch back to crates.io once 0.15.3+ is released with ext_php_rs_sapi_per_thread_shutdown
-ext-php-rs = { git = "https://github.com/extphprs/ext-php-rs.git", features = ["embed"] }
+ext-php-rs = { version = "0.15.6", features = ["embed"] }
 http-body-util = "0.1"
 http-handler = { git = "https://github.com/platformatic/http-handler.git" }
 # http-handler = { path = "../http-handler" }
@@ -41,11 +40,6 @@ regex = "1.0"
 tokio-test = "0.4"
 
 [build-dependencies]
-autotools = "0.2"
-bindgen = "0.69.4"
-cc = "1.1.7"
-downloader = "0.2.8"
-file-mode = "0.1.2"
 napi-build = { version = "2.2.1", optional = true }
 
 # [profile.release]
