@@ -45,16 +45,6 @@ jobs:
               brew install autoconf automake libtool re2c bison libiconv \
               argon2 libzip postgresql@16
 
-          # TODO: Do we need to care about x86_64 macOS?
-          # NOTE: Unable to force link bison on macOS 13, which php-src requires.
-          - host: macos-13
-            target: x86_64-apple-darwin
-            # build: pnpm build --target x86_64-apple-darwin
-            build: pnpm build
-            setup: |
-              brew install autoconf automake libtool re2c bison libiconv \
-              argon2 libzip postgresql@16
-
           #
           # Linux
           #
@@ -302,11 +292,6 @@ jobs:
       fail-fast: false
       matrix:
         settings:
-          - host: macos-13
-            target: x86_64-apple-darwin
-            architecture: x64
-            setup: |
-              brew install openssl@3 argon2 postgresql@16
           - host: macos-15
             target: aarch64-apple-darwin
             architecture: arm64

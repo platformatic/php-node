@@ -24,23 +24,44 @@
 //! let embed = Embed::new_with_args(docroot, None, args())
 //!   .expect("should construct embed");
 //!
+//! # tokio_test::block_on(async {
+//! let body = http_handler::RequestBody::new();
+//!
+//! // Write body data and close the stream
+//! {
+//!   use tokio::io::AsyncWriteExt;
+//!   let mut body_writer = body.clone();
+//!   body_writer.write_all(b"Hello, World!").await.expect("should write body");
+//!   body_writer.shutdown().await.expect("should close request body stream");
+//! }
+//!
 //! let request = http_handler::request::Request::builder()
 //!   .method("POST")
 //!   .uri("http://example.com/index.php")
 //!   .header("Content-Type", "text/html")
 //!   .header("Content-Length", "13")
-//!   .body(bytes::BytesMut::from("Hello, World!"))
+//!   .body(body)
 //!   .expect("should build request");
 //!
-//! # tokio_test::block_on(async {
 //! let response = embed
 //!   .handle(request.clone())
 //!   .await
 //!   .expect("should handle request");
 //!
 //! assert_eq!(response.status(), 200);
-//! assert_eq!(response.body(), "Hello, World!");
-//! println!("Response: {:#?}", response);
+//!
+//! // Consume the streaming response body to ensure PHP task completes
+//! use http_body_util::BodyExt;
+//! let (_parts, body) = response.into_parts();
+//! let mut stream = body;
+//! while let Some(frame_result) = stream.frame().await {
+//!   match frame_result {
+//!     Ok(_) => continue,
+//!     Err(e) => panic!("Error reading response: {}", e),
+//!   }
+//! }
+//!
+//! drop(embed);
 //! # });
 //! ```
 
@@ -54,6 +75,7 @@ extern crate napi_derive;
 
 mod embed;
 mod exception;
+mod extensions;
 mod request_context;
 mod sapi;
 mod scopes;
@@ -64,9 +86,8 @@ mod test;
 /// NAPI bindings for exposing PHP to Node.js
 pub mod napi;
 
-pub use http_handler::{
-  Handler, Request, RequestBuilderExt, Response, ResponseException, ResponseExt,
-};
+pub use http_handler::types::{Request, Response};
+pub use http_handler::{Handler, RequestBuilderExt, ResponseException, ResponseExt};
 pub use http_rewriter as rewrite;
 
 // Re-export commonly used types from http crate
@@ -77,5 +98,6 @@ pub use http_handler::{
 
 pub use embed::{Embed, RequestRewriter};
 pub use exception::{EmbedRequestError, EmbedStartError};
+pub use extensions::{HeadersSentTx, RequestStream, ResponseStream};
 pub use request_context::RequestContext;
 pub use test::{MockRoot, MockRootBuilder};

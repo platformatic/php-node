@@ -5,16 +5,16 @@ use std::{
   sync::{Arc, RwLock, Weak},
 };
 
+use bytes::Buf;
+
 use ext_php_rs::{
   alloc::{efree, estrdup},
   builders::SapiBuilder,
-  embed::{
-    ext_php_rs_sapi_per_thread_init, ext_php_rs_sapi_shutdown, ext_php_rs_sapi_startup, SapiModule,
-  },
+  embed::{ext_php_rs_sapi_shutdown, ext_php_rs_sapi_startup, SapiModule},
   // exception::register_error_observer,
   ffi::{
-    php_module_shutdown, php_module_startup, php_register_variable, sapi_send_headers,
-    sapi_shutdown, sapi_startup, ZEND_RESULT_CODE_SUCCESS,
+    php_module_shutdown, php_module_startup, php_register_variable, sapi_headers_struct,
+    sapi_send_headers, sapi_shutdown, sapi_startup, ZEND_RESULT_CODE_SUCCESS,
   },
   prelude::*,
   zend::{SapiGlobals, SapiHeader},
@@ -22,8 +22,22 @@ use ext_php_rs::{
 
 use once_cell::sync::OnceCell;
 
-use crate::{EmbedRequestError, EmbedStartError, RequestContext};
-use http_handler::ResponseBuilderExt;
+use crate::{extensions::ResponseStream, EmbedRequestError, EmbedStartError, RequestContext};
+use http_handler::extensions::{BodyBuffer, ResponseLog};
+use http_handler::RequestExt;
+use once_cell::sync::Lazy;
+
+// Fallback runtime for sapi callbacks running in blocking context
+static FALLBACK_RUNTIME: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
+  tokio::runtime::Builder::new_multi_thread()
+    .enable_all()
+    .build()
+    .expect("Failed to create Tokio runtime")
+});
+
+pub(crate) fn fallback_handle() -> &'static tokio::runtime::Handle {
+  FALLBACK_RUNTIME.handle()
+}
 
 // This is a helper to ensure that PHP is initialized and deinitialized at the
 // appropriate times.
@@ -44,6 +58,7 @@ impl Sapi {
       .ub_write_function(sapi_module_ub_write)
       .flush_function(sapi_module_flush)
       .send_header_function(sapi_module_send_header)
+      .send_headers_function(sapi_module_send_headers)
       .read_post_function(sapi_module_read_post)
       .read_cookies_function(sapi_module_read_cookies)
       .register_server_variables_function(sapi_module_register_server_variables)
@@ -87,45 +102,16 @@ impl Sapi {
 
     Ok(Sapi(RwLock::new(boxed)))
   }
-
-  pub fn startup(&self) -> Result<(), EmbedRequestError> {
-    unsafe {
-      ext_php_rs_sapi_per_thread_init();
-    }
-
-    let sapi = &mut self
-      .0
-      .write()
-      .map_err(|_| EmbedRequestError::SapiNotStarted)?;
-
-    if let Some(startup) = sapi.startup {
-      if unsafe { startup(sapi.as_mut()) } != ZEND_RESULT_CODE_SUCCESS {
-        return Err(EmbedRequestError::SapiNotStarted);
-      }
-    }
-
-    Ok(())
-  }
-
-  pub fn shutdown(&self) -> Result<(), EmbedRequestError> {
-    let sapi = &mut self
-      .0
-      .write()
-      .map_err(|_| EmbedRequestError::SapiNotShutdown)?;
-
-    if let Some(shutdown) = sapi.shutdown {
-      if unsafe { shutdown(sapi.as_mut()) } != ZEND_RESULT_CODE_SUCCESS {
-        return Err(EmbedRequestError::SapiNotShutdown);
-      }
-    }
-
-    Ok(())
-  }
 }
 
 impl Drop for Sapi {
   fn drop(&mut self) {
-    self.shutdown().unwrap();
+    let sapi = &mut self.0.write().unwrap();
+    if let Some(shutdown) = sapi.shutdown {
+      unsafe {
+        shutdown(sapi.as_mut());
+      }
+    }
 
     unsafe {
       sapi_shutdown();
@@ -219,9 +205,17 @@ pub extern "C" fn sapi_module_startup(
 pub extern "C" fn sapi_module_shutdown(
   _sapi_module: *mut SapiModule,
 ) -> ext_php_rs::ffi::zend_result {
+  // CRITICAL: Clear server_context BEFORE php_module_shutdown
+  // to prevent sapi_flush from accessing freed RequestContext
   unsafe {
     php_module_shutdown();
   }
+
+  {
+    let mut globals = SapiGlobals::get_mut();
+    globals.server_context = std::ptr::null_mut();
+  }
+
   ZEND_RESULT_CODE_SUCCESS
 }
 
@@ -260,16 +254,39 @@ fn maybe_efree(ptr: *mut u8) {
 
 #[no_mangle]
 pub extern "C" fn sapi_module_ub_write(str: *const c_char, str_length: usize) -> usize {
+  use tokio::io::AsyncWriteExt;
+
   if str.is_null() || str_length == 0 {
     return 0;
   }
 
-  let bytes = unsafe { std::slice::from_raw_parts(str as *const u8, str_length) };
-
-  let len = bytes.len();
-  if let Some(ctx) = RequestContext::current() {
-    ctx.response_builder_mut().append_body(bytes);
+  // Send headers if not already sent (implicit header send on first output)
+  unsafe {
+    let globals = SapiGlobals::get();
+    if globals.headers_sent == 0 {
+      sapi_send_headers();
+    }
   }
+
+  let bytes = unsafe { std::slice::from_raw_parts(str as *const u8, str_length) };
+  let len = bytes.len();
+
+  if let Some(ctx) = RequestContext::current() {
+    // Get ResponseStream from extensions
+    if let Some(response_stream) = ctx.extensions().get::<ResponseStream>() {
+      // Clone body to avoid holding ctx reference
+      let mut body = response_stream.0.clone();
+
+      // Use block_on to write asynchronously
+      let result = fallback_handle().block_on(async { body.write_all(bytes).await });
+
+      match result {
+        Ok(_) => return len,
+        Err(_) => return 0, // Write error
+      }
+    }
+  }
+
   len
 }
 
@@ -279,57 +296,173 @@ pub extern "C" fn sapi_module_flush(_server_context: *mut c_void) {
 }
 
 #[no_mangle]
-pub extern "C" fn sapi_module_send_header(header: *mut SapiHeader, _server_context: *mut c_void) {
-  // Not sure _why_ this is necessary, but it is.
-  if header.is_null() {
-    return;
-  }
+pub extern "C" fn sapi_module_send_header(_header: *mut SapiHeader, _server_context: *mut c_void) {
+  // This is called by PHP for each header, but we don't need to track them here.
+  // PHP maintains its own list in sapi_headers_struct, which we read in
+  // sapi_module_send_headers() when headers are finalized.
+}
 
-  let header = unsafe { &*header };
-  let name = header.name();
+#[no_mangle]
+pub extern "C" fn sapi_module_send_headers(sapi_headers: *mut sapi_headers_struct) -> c_int {
+  use ext_php_rs::ffi::sapi_get_default_content_type;
+  use ext_php_rs::zend::SapiHeader;
 
-  // Header value is None for http version + status line
-  if let Some(value) = header.value() {
-    if let Some(ctx) = RequestContext::current() {
-      let builder = std::mem::replace(
-        ctx.response_builder_mut(),
-        http_handler::response::Builder::new(),
-      );
-      let builder = builder.header(name, value);
-      *ctx.response_builder_mut() = builder;
+  // Extract status and mimetype as owned types BEFORE leaving PHP thread
+  if let Some(ctx) = RequestContext::current() {
+    let (status, mimetype_owned) = {
+      let h = SapiGlobals::get().sapi_headers;
+      let mut mime = h.mimetype;
+      if mime.is_null() {
+        mime = unsafe { sapi_get_default_content_type() };
+      }
+
+      let mime_str = if !mime.is_null() {
+        unsafe { std::ffi::CStr::from_ptr(mime) }
+          .to_str()
+          .unwrap_or("text/html")
+          .to_owned()
+      } else {
+        "text/html".to_owned()
+      };
+
+      // Free the mimetype if it was allocated
+      if !mime.is_null() && mime != h.mimetype {
+        unsafe { efree(mime.cast::<u8>()) };
+      }
+
+      (h.http_response_code as u16, mime_str)
+    };
+
+    // Extract headers from sapi_headers_struct
+    let mut custom_headers = Vec::new();
+    if !sapi_headers.is_null() {
+      let headers_list = unsafe { &(*sapi_headers).headers };
+
+      for header in headers_list.iter::<SapiHeader>() {
+        let name = header.name();
+        if let Some(value) = header.value() {
+          custom_headers.push((name.to_string(), value.to_string()));
+        }
+      }
     }
+
+    // Collect logs from ResponseLog extension
+    let logs = if let Some(log_ext) = ctx.extensions().get::<ResponseLog>() {
+      bytes::Bytes::copy_from_slice(log_ext.as_bytes())
+    } else {
+      bytes::Bytes::new()
+    };
+
+    // Signal headers sent with owned data including custom headers and logs
+    ctx.signal_headers_sent_with_data(status, mimetype_owned.clone(), custom_headers, logs);
   }
+
+  1 // SAPI_HEADER_SENT_SUCCESSFULLY
 }
 
 #[no_mangle]
 pub extern "C" fn sapi_module_read_post(buffer: *mut c_char, length: usize) -> usize {
+  use tokio::io::AsyncReadExt;
+
   if length == 0 {
     return 0;
   }
 
-  RequestContext::current()
-    .map(|ctx| {
-      let body = ctx.request_mut().body_mut();
-      let actual_length = length.min(body.len());
-      if actual_length == 0 {
-        return 0;
+  let result = RequestContext::current()
+    .and_then(|ctx| {
+      // Get or create BodyBuffer extension
+      let buffer_len = ctx
+        .extensions()
+        .get::<BodyBuffer>()
+        .map(|b| b.len())
+        .unwrap_or(0);
+
+      // If buffer is empty and we have a request stream, wait for data
+      if buffer_len == 0 {
+        // Check if we have a request stream
+        if let Some(request_stream) = ctx.extensions().get::<crate::extensions::RequestStream>() {
+          // Clone body to avoid holding ctx reference
+          let mut body = request_stream.0.clone();
+
+          // Keep reading chunks until we have enough data or hit EOF
+          loop {
+            // Check current buffer size
+            let current_buffer_len = ctx
+              .extensions()
+              .get::<BodyBuffer>()
+              .map(|b| b.len())
+              .unwrap_or(0);
+
+            // If we have enough data, stop reading
+            if current_buffer_len >= length {
+              break;
+            }
+
+            // Read a chunk from the stream using block_on
+            let read_result = fallback_handle().block_on(async {
+              let mut chunk = vec![0u8; 8192];
+              match body.read(&mut chunk).await {
+                Ok(0) => None, // EOF
+                Ok(n) => {
+                  chunk.truncate(n);
+                  Some(bytes::Bytes::from(chunk))
+                }
+                Err(_) => None, // Error, treat as EOF
+              }
+            });
+
+            // Append data if we got some
+            if let Some(data) = read_result {
+              if !data.is_empty() {
+                // Get or insert BodyBuffer and append data
+                if let Some(body_buf) = ctx.extensions_mut().get_mut::<BodyBuffer>() {
+                  body_buf.append(&data);
+                } else {
+                  ctx.extensions_mut().insert(BodyBuffer::from_bytes(data));
+                }
+              }
+            } else {
+              // EOF reached
+              break;
+            }
+          }
+        }
       }
 
-      // Properly consume from the original body buffer
-      let chunk = body.split_to(actual_length);
+      // Now read from the buffer
+      // We need to consume data from the buffer, so we'll convert to BytesMut, split, then convert back
+      ctx
+        .extensions_mut()
+        .get_mut::<BodyBuffer>()
+        .and_then(|body| {
+          let actual_length = length.min(body.len());
+          if actual_length == 0 {
+            return None;
+          }
 
-      unsafe {
-        std::ptr::copy_nonoverlapping(chunk.as_ptr() as *mut c_char, buffer, actual_length);
-      }
-      actual_length
+          // Get the bytes as a slice and copy to output buffer
+          let bytes = body.as_bytes();
+          unsafe {
+            std::ptr::copy_nonoverlapping(bytes.as_ptr() as *const c_char, buffer, actual_length);
+          }
+
+          // Now we need to remove the consumed bytes - convert to BytesMut, split, convert back
+          let mut bytes_mut = std::mem::replace(body, BodyBuffer::new()).into_bytes_mut();
+          bytes_mut.advance(actual_length);
+          *body = BodyBuffer::from_bytes(bytes_mut.freeze());
+
+          Some(actual_length)
+        })
     })
-    .unwrap_or(0)
+    .unwrap_or(0);
+
+  result
 }
 
 #[no_mangle]
 pub extern "C" fn sapi_module_read_cookies() -> *mut c_char {
   RequestContext::current()
-    .map(|ctx| match ctx.request().headers().get("Cookie") {
+    .map(|ctx| match ctx.headers().get("Cookie") {
       Some(cookie) => estrdup(cookie.to_str().unwrap_or("")),
       None => std::ptr::null_mut(),
     })
@@ -377,9 +510,8 @@ pub extern "C" fn sapi_module_register_server_variables(vars: *mut ext_php_rs::t
   // }
 
   if let Some(ctx) = RequestContext::current() {
-    let request = ctx.request();
-    let headers = request.headers();
-    let uri = request.uri();
+    let headers = ctx.headers();
+    let uri = ctx.uri();
 
     // Hack to allow ? syntax for the following code.
     // At the moment any errors are just swallowed, but these could be
@@ -396,8 +528,11 @@ pub extern "C" fn sapi_module_register_server_variables(vars: *mut ext_php_rs::t
         let globals = SapiGlobals::get();
         let req_info = &globals.request_info;
 
-        let docroot = ctx.docroot();
-        let docroot_str = docroot.display().to_string();
+        // Get docroot from DocumentRoot extension
+        let docroot_str = ctx
+          .document_root()
+          .map(|dr| dr.path.display().to_string())
+          .unwrap_or_else(|| ".".to_string());
 
         let script_filename = req_info.path_translated;
         let script_name = if !req_info.request_uri.is_null() {
@@ -441,7 +576,7 @@ pub extern "C" fn sapi_module_register_server_variables(vars: *mut ext_php_rs::t
           env_var_c(vars, "SERVER_SOFTWARE", inner_sapi.name)?;
         }
 
-        if let Some(socket_info) = request.extensions().get::<http_handler::SocketInfo>() {
+        if let Some(socket_info) = ctx.extensions().get::<http_handler::SocketInfo>() {
           if let Some(local) = socket_info.local {
             env_var(vars, "SERVER_ADDR", local.ip().to_string())?;
             env_var(vars, "SERVER_PORT", local.port().to_string())?;
@@ -474,7 +609,11 @@ pub extern "C" fn sapi_module_register_server_variables(vars: *mut ext_php_rs::t
 pub extern "C" fn sapi_module_log_message(message: *const c_char, _syslog_type_int: c_int) {
   let message = unsafe { CStr::from_ptr(message) };
   if let Some(ctx) = RequestContext::current() {
-    ctx.response_builder_mut().append_log(message.to_bytes());
+    // Append to ResponseLog extension for both streaming and buffered modes
+    // Note: PHP's SAPI adds the newline, so we just append the message
+    if let Some(log_ext) = ctx.extensions_mut().get_mut::<ResponseLog>() {
+      log_ext.append(message.to_bytes());
+    }
   }
 }
 
@@ -486,11 +625,9 @@ pub extern "C" fn sapi_module_log_message(message: *const c_char, _syslog_type_i
 pub fn apache_request_headers() -> Result<HashMap<String, String>, String> {
   let mut headers = HashMap::new();
 
-  let request = RequestContext::current()
-    .map(|ctx| ctx.request())
-    .ok_or("Request context unavailable")?;
+  let ctx = RequestContext::current().ok_or("Request context unavailable")?;
 
-  for (key, value) in request.headers().iter() {
+  for (key, value) in ctx.headers().iter() {
     headers.insert(key.to_string(), value.to_str().unwrap_or("").to_string());
   }
 

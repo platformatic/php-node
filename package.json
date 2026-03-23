@@ -11,9 +11,7 @@
     "binaryName": "php",
     "targets": [
       "aarch64-apple-darwin",
-      "x86_64-apple-darwin",
-      "x86_64-unknown-linux-gnu",
-      "universal-apple-darwin"
+      "x86_64-unknown-linux-gnu"
     ]
   },
   "license": "MIT",
@@ -34,7 +32,6 @@
     "build:debug": "napi build --platform --no-js --output-dir . --features napi-support -- --lib",
     "lint": "oxlint",
     "test": "ava __test__/**.spec.mjs",
-    "universal": "napi universal",
     "version": "napi version"
   }
 }
