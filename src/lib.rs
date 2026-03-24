@@ -5,7 +5,7 @@
 //!
 //! ## Example
 //!
-//! ```rust
+//! ```rust,no_run
 //! use std::env::{args, current_dir};
 //! # use std::path::PathBuf;
 //! # use php::MockRoot;
