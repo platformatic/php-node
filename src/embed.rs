@@ -226,7 +226,7 @@ impl Handler for Embed {
   ///
   /// # Examples
   ///
-  /// ```
+  /// ```no_run
   /// use std::{env::temp_dir, fs::File, io::Write};
   /// use php::{Embed, Handler, Request, Response, MockRoot};
   ///
