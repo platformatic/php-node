@@ -33,6 +33,9 @@ jobs:
       run-tests: ${{ inputs.skip-tests == false }}
 
   release-npm:
+    permissions:
+      contents: write
+      id-token: write
     needs: build-and-test
     runs-on: ubuntu-latest
     environment: npm
@@ -67,5 +70,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --access public --tag ${{ inputs.prerelease == true && 'next' || 'latest' }}
       - name: Create release notes
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
-          npx @matteo.collina/release-notes -a ${{ secrets.GITHUB_TOKEN }} -t v${{ inputs.version }} -r php-node -o platformatic ${{ inputs.prerelease == true && '-p' || '' }} -c ${{ github.ref }}
+          npx @matteo.collina/release-notes -t v${{ inputs.version }} -r php-node -o platformatic ${{ inputs.prerelease == true && '-p' || '' }} -c ${{ github.ref }}
