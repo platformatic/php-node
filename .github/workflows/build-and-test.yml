@@ -90,7 +90,7 @@ jobs:
         with:
           repository: php/php-src
           path: php-src
-          ref: PHP-8.4
+          ref: php-8.4.27
       - name: Install dependencies
         run: pnpm install
       - name: Fetch cargo dependencies
